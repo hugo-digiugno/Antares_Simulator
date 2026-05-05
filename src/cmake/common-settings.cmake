@@ -5,10 +5,11 @@ set(CMAKE_CXX_STANDARD 20)
 
 set(COMMON_GCC_FLAGS "-Wall -W -Wextra -Wfatal-errors")
 if (NOT WIN32)
-    # These flags are incompatible with non-x86 architectures (e.g ARM)
-    # TODO remove
-    set(COMMON_GCC_FLAGS "${COMMON_GCC_FLAGS} -pipe -msse -msse2 -Wunused-but-set-variable -Wunused-but-set-parameter")
+    set(COMMON_GCC_FLAGS "${COMMON_GCC_FLAGS} -pipe -Wunused-but-set-variable -Wunused-but-set-parameter")
     set(COMMON_GCC_FLAGS "${COMMON_GCC_FLAGS} -Werror=return-type")
+    if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|i686|AMD64")
+        set(COMMON_GCC_FLAGS "${COMMON_GCC_FLAGS} -msse -msse2")
+    endif ()
 endif ()
 set(COMMON_MSVC_FLAGS "/W3 /MP4")
 set(COMMON_MSVC_FLAGS "${COMMON_MSVC_FLAGS} /we4715 /we4716") #adding no return or no return for all code paths as errors
