@@ -288,6 +288,9 @@ public:
     // In solver, it is the max number of years (actually run, not skipped) a set of parallel
     // years can contain.
     uint maxNbYearsInParallel = 1;
+    //! Maximum number of weeks solved in parallel within each MC year (Fast Mode UC only).
+    //! Default is 1 (sequential, existing behaviour).
+    uint maxNbWeeksInParallel = 1;
 
     //! Parameters
     Parameters parameters;

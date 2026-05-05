@@ -4,6 +4,7 @@
 #include "antares/solver/misc/options.h"
 
 #include <fstream>
+#include <thread>
 
 #include <antares/exception/LoadingError.hpp>
 #include "antares/config/config.h"
@@ -33,6 +34,11 @@ void addSimulationOptions(Yuni::GetOpt::Parser& parser, Antares::Data::StudyLoad
                ' ',
                "force-parallel",
                "Override the max number of years computed simultaneously");
+    parser.add(options.maxNbWeeksInParallel,
+               ' ',
+               "parallel-week-count",
+               "Number of weeks to solve in parallel within each MC year (default: 1, requires Fast "
+               "Mode UC)");
 }
 
 void addParameterOptions(Yuni::GetOpt::Parser& parser,
@@ -67,10 +73,6 @@ void addParameterOptions(Yuni::GetOpt::Parser& parser,
                    'z',
                    "zip-output",
                    "Force the write output into a single zip archive");
-    parser.addFlag(settings.parquetFmtForSimuTables,
-                   ' ',
-                   "parquet",
-                   "Parquet format for simulation tables");
 }
 
 void addOptimizationOptions(Yuni::GetOpt::Parser& parser,
@@ -245,6 +247,29 @@ void checkAndCorrectSettingsAndOptions(Settings& settings, Antares::Data::StudyL
     if (options.enableParallel && options.forceParallel)
     {
         throw Error::IncompatibleParallelOptions();
+    }
+
+    // Validate week-level parallelism
+    if (options.maxNbWeeksInParallel < 1)
+    {
+        options.maxNbWeeksInParallel = 1;
+    }
+    if (options.maxNbWeeksInParallel > 1 && options.maxNbYearsInParallel > 0)
+    {
+        const uint hwConcurrency = std::thread::hardware_concurrency();
+        if (hwConcurrency > 0)
+        {
+            const uint product = options.maxNbYearsInParallel * options.maxNbWeeksInParallel;
+            if (product > hwConcurrency)
+            {
+                logs.warning()
+                  << "maxNbYearsInParallel (" << options.maxNbYearsInParallel
+                  << ") x maxNbWeeksInParallel (" << options.maxNbWeeksInParallel
+                  << ") = " << product
+                  << " exceeds hardware concurrency (" << hwConcurrency
+                  << "). Consider reducing one of these values.";
+            }
+        }
     }
 
     applySimplexOptimRange(settings, options);

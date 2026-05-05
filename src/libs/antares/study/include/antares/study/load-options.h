@@ -57,6 +57,9 @@ public:
     bool forceParallel;
     uint maxNbYearsInParallel;
 
+    //! Number of weeks to solve in parallel within each MC year (Fast Mode UC only)
+    uint maxNbWeeksInParallel = 1;
+
     //! All options related to linear & quadratic optimization
     Antares::Solver::Optimization::CmdLineOptimOptions solverOptions;
 
