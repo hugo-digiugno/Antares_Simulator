@@ -4,6 +4,7 @@
 #include "antares/solver/optimisation/adequacy_patch_csr/adq_patch_curtailment_sharing.h"
 
 #include <cmath>
+#include <spx_constantes_externes.h>
 
 #include "antares/solver/adequacy-patch/gems-csr-adapter.h"
 #include "antares/solver/optimisation/adequacy_patch_csr/count_constraints_variables.h"
@@ -145,6 +146,7 @@ void HourlyCSRProblem::calculateCsrParameters()
               adqPatchParams_.setToZeroOutsideInsideLinks,
               Area,
               hour);
+
             double ensInit = problemeHebdo_->ResultatsHoraires[Area]
                                .ValeursHorairesDeDefaillancePositive[hour];
             double spillageInit = problemeHebdo_->ResultatsHoraires[Area]
@@ -179,8 +181,9 @@ void HourlyCSRProblem::buildProblemVariables()
         CsrColumnAllocator allocator(problemeAResoudre_,
                                      problemeAResoudre_.NombreDeVariables);
         rtd->gemsCsrAdapter->registerExtraVariables(allocator);
-        // NombreDeVariables is NOT updated here; it was set to the total count
-        // (legacy + extra) by countVariables() in allocateProblem().
+        // constructVariableENS() reset NombreDeVariables to 0 and rebuilt it to
+        // the legacy count; advance it past the GEMS extra columns now.
+        problemeAResoudre_.NombreDeVariables += rtd->gemsCsrAdapter->countExtraVariables();
     }
 }
 

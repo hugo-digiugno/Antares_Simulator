@@ -148,7 +148,6 @@ void CurtailmentSharing::addProperties(IniFile::Section* section) const
 void AdqPatchParams::reset()
 {
     enabled = false;
-src/solver/CMakeLists.txt
     curtailmentSharing.reset();
     setToZeroOutsideInsideLinks = true;
 }
