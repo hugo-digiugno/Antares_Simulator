@@ -11,14 +11,28 @@
 #include <boost/iostreams/device/mapped_file.hpp>
 #include <boost/iostreams/stream.hpp>
 
+#include <arrow/api.h>
+#include <arrow/compute/api.h>
+#include <arrow/io/api.h>
+#include <parquet/arrow/reader.h>
+
 #include <antares/io/inputs/data-series-csv-importer/DataSeriesRepoImporter.h>
 #include <antares/optimisation/linear-problem-data-impl/timeSeriesSet.h>
 
 namespace fs = std::filesystem;
 
+namespace Antares::IO::Inputs
+{
+struct InputError: std::runtime_error
+{
+    using std::runtime_error::runtime_error;
+};
+} // namespace Antares::IO::Inputs
+
 namespace Antares::IO::Inputs::DataSeriesCsvImporter
 {
 using namespace Optimisation::LinearProblemDataImpl;
+using Antares::IO::Inputs::InputError;
 
 inline const char* ParseOneDouble(const char* ptr,
                                   const char* end,
@@ -165,10 +179,87 @@ static std::vector<std::vector<double>> readCSV(const std::filesystem::path& fil
     return columns;
 }
 
+static std::vector<std::vector<double>> readParquet(const std::filesystem::path& filename)
+{
+    auto maybeFile = arrow::io::ReadableFile::Open(filename.string());
+    if (!maybeFile.ok())
+    {
+        throw InputError("Failed to open Parquet file '" + filename.string()
+                         + "': " + maybeFile.status().ToString());
+    }
+
+    std::unique_ptr<parquet::arrow::FileReader> reader;
+    arrow::Status status = parquet::arrow::OpenFile(*maybeFile,
+                                                    arrow::default_memory_pool(),
+                                                    &reader);
+    if (!status.ok())
+    {
+        throw InputError("Failed to open Parquet reader for '" + filename.string()
+                         + "': " + status.ToString());
+    }
+
+    std::shared_ptr<arrow::Table> table;
+    status = reader->ReadTable(&table);
+    if (!status.ok())
+    {
+        throw InputError("Failed to read Parquet table from '" + filename.string()
+                         + "': " + status.ToString());
+    }
+
+    const int64_t numRows = table->num_rows();
+    const int numCols = table->num_columns();
+
+    std::vector<std::vector<double>> columns(numCols, std::vector<double>(numRows));
+
+    for (int colIdx = 0; colIdx < numCols; ++colIdx)
+    {
+        auto column = table->column(colIdx);
+        const std::string fieldName = table->schema()->field(colIdx)->name();
+
+        if (column->type()->id() != arrow::Type::DOUBLE)
+        {
+            if (!arrow::is_numeric(column->type()->id()))
+            {
+                throw InputError("Column '" + fieldName
+                                 + "' cannot be cast to double in Parquet file: "
+                                 + filename.string());
+            }
+            auto castResult = arrow::compute::Cast(*column,
+                                                   arrow::float64(),
+                                                   arrow::compute::CastOptions::Safe());
+            if (!castResult.ok())
+            {
+                throw InputError("Failed to cast column '" + fieldName
+                                 + "' to double: " + castResult.status().ToString());
+            }
+            column = castResult->chunked_array();
+        }
+
+        int64_t rowOffset = 0;
+        for (const auto& chunk: column->chunks())
+        {
+            const auto& arr = std::static_pointer_cast<arrow::DoubleArray>(chunk);
+            for (int64_t i = 0; i < arr->length(); ++i)
+            {
+                if (arr->IsNull(i))
+                {
+                    throw InputError("Null value at row " + std::to_string(rowOffset + i)
+                                     + " in column '" + fieldName + "' of Parquet file: "
+                                     + filename.string());
+                }
+                columns[colIdx][rowOffset + i] = arr->Value(i);
+            }
+            rowOffset += arr->length();
+        }
+    }
+
+    return columns;
+}
+
 bool hasRightExtension(const std::filesystem::directory_entry& e)
 {
     auto ext = e.path().extension();
-    return (ext == ".csv") || (ext == ".tsv");
+    return (ext == ".csv") || (ext == ".tsv") || (ext == ".parquet");
 }
 
 DataSeriesRepository DataSeriesRepoImporter::importFromDirectory(const std::filesystem::path& path,
@@ -189,8 +280,11 @@ DataSeriesRepository DataSeriesRepoImporter::importFromDirectory(const std::file
         {
             continue;
         }
-        auto timeSeriesSet = std::make_unique<TimeSeriesSet>(entry.path().stem().string(),
-                                                             readCSV(entry, csvSeparator));
+        const auto& entryPath = entry.path();
+        auto data = (entryPath.extension() == ".parquet") ? readParquet(entryPath)
+                                                          : readCSV(entryPath, csvSeparator);
+        auto timeSeriesSet = std::make_unique<TimeSeriesSet>(entryPath.stem().string(),
+                                                             std::move(data));
         repo.addDataSeries(std::move(timeSeriesSet));
     }
     return repo;
