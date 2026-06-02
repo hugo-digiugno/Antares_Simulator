@@ -113,6 +113,10 @@ private:
     // Variable bounds
     void setBoundsOnGemsFbExtraVars();
 
+    // Post-solve: write CSR-optimal GEMS exchange back to ValeursHorairesNetechangeModeler
+    // so that balance.h sees the post-CSR CCR flows rather than the stale pre-CSR values.
+    void updateGemsExchangeAfterCSR();
+
     // Costs
     void setQuadraticCost();
     void setLinearCost();

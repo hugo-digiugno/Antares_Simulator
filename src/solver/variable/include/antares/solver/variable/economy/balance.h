@@ -215,6 +215,8 @@ public:
         {
             // ValeursHorairesNetechangeModeler uses "net import" convention (positive = area
             // receives power from GEMS component), while bilanPays uses "net export" convention.
+            // After CSR, updateGemsExchangeAfterCSR() writes the post-CSR CCR solution back
+            // here, so this correctly reflects the post-CSR area balance.
             bilanPays -= state.problemeHebdo
                            ->ResultatsHoraires[state.area->index]
                            .ValeursHorairesNetechangeModeler[state.hourInTheWeek];

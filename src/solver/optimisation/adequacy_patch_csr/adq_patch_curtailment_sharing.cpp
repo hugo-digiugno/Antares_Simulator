@@ -244,7 +244,7 @@ void HourlyCSRProblem::solveProblem(uint week, int year, const OptimizationOptio
 }
 
 void HourlyCSRProblem::run(uint week, uint year)
-{   
+{
     mcYear_ = static_cast<int>(year);
     calculateCsrParameters();
     buildProblemVariables();
@@ -253,6 +253,38 @@ void HourlyCSRProblem::run(uint week, uint year)
     buildProblemConstraintsRHS();
     setProblemCost();
     solveProblem(week, year, solverOptions_);
+    updateGemsExchangeAfterCSR();
+}
+
+void HourlyCSRProblem::updateGemsExchangeAfterCSR()
+{
+    const auto* rtd = problemeHebdo_->adequacyPatchRuntimeData.get();
+    if (!rtd || !rtd->useGemsFbConstraints || !rtd->gemsCsrAdapter)
+        return;
+
+    const auto& contribs = rtd->gemsCsrAdapter->areaFlowContributions();
+    if (contribs.empty())
+        return;
+
+    // Map area name → area index
+    std::map<std::string, int> nameToIdx;
+    for (uint32_t i = 0; i < problemeHebdo_->NombreDePays; ++i)
+        nameToIdx[problemeHebdo_->NomsDesPays[i]] = static_cast<int>(i);
+
+    // Reset ValeursHorairesNetechangeModeler for this hour for every area
+    for (uint32_t i = 0; i < problemeHebdo_->NombreDePays; ++i)
+        problemeHebdo_->ResultatsHoraires[i].ValeursHorairesNetechangeModeler[triggeredHour] = 0.0;
+
+    // Accumulate the CSR-solved GEMS exchange into each area's slot
+    for (const auto& contrib : contribs)
+    {
+        auto it = nameToIdx.find(contrib.areaName);
+        if (it == nameToIdx.end())
+            continue;
+        double val = problemeAResoudre_.X[contrib.csrColumn];
+        problemeHebdo_->ResultatsHoraires[it->second]
+            .ValeursHorairesNetechangeModeler[triggeredHour] += contrib.coefficient * val;
+    }
 }
 
 void HourlyCSRProblem::setBoundsOnGemsFbExtraVars()
