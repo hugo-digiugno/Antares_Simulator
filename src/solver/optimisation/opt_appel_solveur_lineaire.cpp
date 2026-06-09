@@ -82,15 +82,14 @@ FillContext buildFillContext(const PROBLEME_HEBDO* problemeHebdo, int NumInterva
     auto nTsInDay = static_cast<unsigned>(problemeHebdo->NombreDePasDeTempsDUneJournee);
     if (problemeHebdo->OptimisationAuPasHebdomadaire)
     {
-        globalFirst = problemeHebdo->weekInTheYear * nTsInDay * problemeHebdo->NombreDeJours;
+        globalFirst = problemeHebdo->HeureDansLAnnee;
         globalLast = globalFirst + nTsInDay * problemeHebdo->NombreDeJours - 1;
         localLast = nTsInDay * problemeHebdo->NombreDeJours - 1;
     }
     else
     {
-        globalFirst = (problemeHebdo->weekInTheYear * problemeHebdo->NombreDeJours
-                       + static_cast<unsigned>(NumIntervalle))
-                      * nTsInDay;
+        globalFirst = problemeHebdo->HeureDansLAnnee
+                      + static_cast<unsigned>(NumIntervalle) * nTsInDay;
         globalLast = globalFirst + nTsInDay - 1;
         localLast = nTsInDay - 1;
     }
@@ -241,9 +240,12 @@ static SimplexResult OPT_TryToCallSimplex(const SingleOptimOptions& options,
 
     if (simulationTable && modelerData)
     {
+        const unsigned heure = problemeHebdo->HeureDansLAnnee;
         unsigned currentBlock = problemeHebdo->OptimisationAuPasHebdomadaire
-                                  ? problemeHebdo->weekInTheYear
-                                  : problemeHebdo->weekInTheYear * 7 + NumIntervalle;
+                                  ? heure / problemeHebdo->NombreDePasDeTemps
+                                  : heure / static_cast<unsigned>(
+                                        problemeHebdo->NombreDePasDeTempsDUneJournee)
+                                        + static_cast<unsigned>(NumIntervalle);
         TimeConversionMode timeConversionMode = problemeHebdo->OptimisationAuPasHebdomadaire
                                                   ? TimeConversionMode::WeeklyBlocks
                                                   : TimeConversionMode::DailyBlocks;

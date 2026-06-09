@@ -72,9 +72,10 @@ public:
     HourlyCSRProblem(const HourlyCSRProblem&) = delete;
     HourlyCSRProblem& operator=(const HourlyCSRProblem&) = delete;
 
-    inline void setHour(int hour)
+    inline void setHour(int localHour, int globalHour)
     {
-        triggeredHour = hour;
+        triggeredHour = localHour;
+        globalTriggeredHour = globalHour;
     }
 
     void run(unsigned int week, unsigned int year);
@@ -130,6 +131,7 @@ public:
     std::set<int> ensVariablesInsideAdqPatch;       // place inside only ENS inside adq-patch
     std::set<int> varToBeSetToZeroIfBelowThreshold; // place inside only ENS and Spillage variable
     int triggeredHour;
+    int globalTriggeredHour;
 
     const AdqPatchParams& adqPatchParams_;
     VariableManagement::VariableManager variableManager_;

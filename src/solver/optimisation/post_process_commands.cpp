@@ -231,6 +231,7 @@ void CurtailmentSharingPostProcessCmd::execute(const optRuntimeData& opt_runtime
 {
     unsigned int year = opt_runtime_data.year;
     unsigned int week = opt_runtime_data.week;
+    unsigned int hourInTheYear = opt_runtime_data.hourInTheYear;
 
     double totalLmrViolation = calculateDensNewAndTotalLmrViolation();
     logs.info() << "[adq-patch] Year:" << year + 1 << " Week:" << week + 1
@@ -241,7 +242,7 @@ void CurtailmentSharingPostProcessCmd::execute(const optRuntimeData& opt_runtime
     {
         logs.info() << "[adq-patch] CSR triggered for Year:" << year + 1
                     << " Hour:" << week * nbHoursInWeek + hourInWeek + 1;
-        hourlyCsrProblem.setHour(hourInWeek);
+        hourlyCsrProblem.setHour(hourInWeek, static_cast<int>(hourInTheYear) + hourInWeek);
         hourlyCsrProblem.run(week, year);
     }
 }

@@ -140,12 +140,13 @@ void CsrQuadraticProblem::setFlowBasedConstraints(ConstraintBuilder& builder)
     }
 
     const int hour = hourlyCsrProblem_.triggeredHour;
+    const int globalHour = hourlyCsrProblem_.globalTriggeredHour;
     const int mcYear = hourlyCsrProblem_.mcYear_;
 
     auto& rowIndices = hourlyCsrProblem_.gemsFbConstraintRows_;
     rowIndices.clear();
 
-    const auto rows = rtd->gemsCsrAdapter->rowsForHour(hour, mcYear);
+    const auto rows = rtd->gemsCsrAdapter->rowsForHour(globalHour, mcYear);
     for (const auto& row : rows)
     {
         builder.updateHourWithinWeek(static_cast<unsigned>(hour));

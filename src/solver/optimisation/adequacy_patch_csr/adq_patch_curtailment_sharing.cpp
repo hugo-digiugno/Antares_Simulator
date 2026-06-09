@@ -317,7 +317,7 @@ void HourlyCSRProblem::setRHSgemsFbConstraintsValue()
         return;
     }
 
-    const auto rows = rtd->gemsCsrAdapter->rowsForHour(triggeredHour, mcYear_);
+    const auto rows = rtd->gemsCsrAdapter->rowsForHour(globalTriggeredHour, mcYear_);
     for (size_t i = 0; i < rows.size() && i < gemsFbConstraintRows_.size(); ++i)
     {
         const int csrRow = gemsFbConstraintRows_[i];
