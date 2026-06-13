@@ -298,6 +298,12 @@ void HourlyCSRProblem::setBoundsOnGemsFbExtraVars()
     // Their bounds were written by CsrColumnAllocator during buildProblemVariables();
     // re-apply them here so they survive the AdresseOuPlacerLaValeurDesVariablesOptimisees
     // reset loop at the top of setVariableBounds().
+    // Physical bounds come from the FB constraints injected by setFlowBasedConstraints().
+    //
+    // TODO(warm-start): initialise X[col] to the pre-CSR LP solution value for each GEMS
+    // variable so the QP solver starts from a feasible interior point rather than the origin.
+    // Requires GemsCsrAdapter to expose per-column pre-CSR values (time-indexed), which in
+    // turn needs OptimEntityContainer accessible from the CSR context.
     constexpr double kInf = 1e20;
     const int legacyEnd = problemeAResoudre_.NombreDeVariables
                           - rtd->gemsCsrAdapter->countExtraVariables();
@@ -306,6 +312,7 @@ void HourlyCSRProblem::setBoundsOnGemsFbExtraVars()
         problemeAResoudre_.Xmin[col] = -kInf;
         problemeAResoudre_.Xmax[col] = kInf;
         problemeAResoudre_.TypeDeVariable[col] = VARIABLE_NON_BORNEE;
+        problemeAResoudre_.X[col] = 0.0;
     }
 }
 

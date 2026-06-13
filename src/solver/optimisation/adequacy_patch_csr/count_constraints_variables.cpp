@@ -77,11 +77,6 @@ int countConstraints(const PROBLEME_HEBDO* problemeHebdo)
     if (rtd && rtd->useGemsFbConstraints && rtd->gemsCsrAdapter)
     {
         numberOfConstraints += rtd->gemsCsrAdapter->countMatchingConstraints();
-        // Conservation constraint: Σ ccr_exchange_A = 0 (one row, added when areas exist)
-        if (rtd->gemsCsrAdapter->hasAreaFlowContributions())
-        {
-            numberOfConstraints += 1;
-        }
     }
 
     return numberOfConstraints;
