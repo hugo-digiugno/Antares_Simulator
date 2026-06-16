@@ -23,6 +23,8 @@ void HourlyCSRProblem::constructVariableENS()
         {
             variableManager_.PositiveUnsuppliedEnergy(area, triggeredHour) = NumberOfVariables;
             problemeAResoudre_.TypeDeVariable[NumberOfVariables] = VARIABLE_BORNEE_DES_DEUX_COTES;
+            problemeAResoudre_.NomDesVariables[NumberOfVariables]
+              = std::string("ENS[") + problemeHebdo_->NomsDesPays[area] + "]";
             varToBeSetToZeroIfBelowThreshold.insert(NumberOfVariables);
             ensVariablesInsideAdqPatch.insert(NumberOfVariables);
             logs.debug() << NumberOfVariables << " ENS[" << area << "].-["
@@ -47,6 +49,8 @@ void HourlyCSRProblem::constructVariableSpilledEnergy()
         {
             variableManager_.NegativeUnsuppliedEnergy(area, triggeredHour) = NumberOfVariables;
             problemeAResoudre_.TypeDeVariable[NumberOfVariables] = VARIABLE_BORNEE_INFERIEUREMENT;
+            problemeAResoudre_.NomDesVariables[NumberOfVariables]
+              = std::string("SPILL[") + problemeHebdo_->NomsDesPays[area] + "]";
             varToBeSetToZeroIfBelowThreshold.insert(NumberOfVariables);
             logs.debug() << NumberOfVariables << " Spilled Energy[" << area << "].-["
                          << problemeHebdo_->NomsDesPays[area] << "].";
@@ -77,25 +81,35 @@ void HourlyCSRProblem::constructVariableFlows()
             int indirectVar;
             algebraicFluxVar = variableManager_.NTCDirect(Interco, triggeredHour)
               = NumberOfVariables;
-            problemeAResoudre_.TypeDeVariable[NumberOfVariables] = VARIABLE_BORNEE_DES_DEUX_COTES;
-            logs.debug()
-              << NumberOfVariables << " flow[" << Interco << "]. ["
-              << problemeHebdo_
-                   ->NomsDesPays[problemeHebdo_->PaysExtremiteDeLInterconnexion[Interco]]
-              << "]-["
-              << problemeHebdo_->NomsDesPays[problemeHebdo_->PaysOrigineDeLInterconnexion[Interco]]
-              << "].";
+            {
+                const std::string orig(
+                  problemeHebdo_
+                    ->NomsDesPays[problemeHebdo_->PaysOrigineDeLInterconnexion[Interco]]);
+                const std::string extr(
+                  problemeHebdo_
+                    ->NomsDesPays[problemeHebdo_->PaysExtremiteDeLInterconnexion[Interco]]);
+                problemeAResoudre_.NomDesVariables[NumberOfVariables]
+                  = "FLOW[" + orig + ">>" + extr + "]";
+                problemeAResoudre_.TypeDeVariable[NumberOfVariables]
+                  = VARIABLE_BORNEE_DES_DEUX_COTES;
+                logs.debug() << NumberOfVariables << " flow[" << Interco << "]. [" << extr
+                             << "]-[" << orig << "].";
+            }
             NumberOfVariables++;
 
             directVar = variableManager_.IntercoDirectCost(Interco, triggeredHour)
               = NumberOfVariables;
             problemeAResoudre_.TypeDeVariable[NumberOfVariables] = VARIABLE_BORNEE_DES_DEUX_COTES;
+            problemeAResoudre_.NomDesVariables[NumberOfVariables]
+              = "FLOW_DIR[" + std::to_string(Interco) + "]";
             logs.debug() << NumberOfVariables << " direct flow[" << Interco << "]. ";
             NumberOfVariables++;
 
             indirectVar = variableManager_.IntercoIndirectCost(Interco, triggeredHour)
               = NumberOfVariables;
             problemeAResoudre_.TypeDeVariable[NumberOfVariables] = VARIABLE_BORNEE_DES_DEUX_COTES;
+            problemeAResoudre_.NomDesVariables[NumberOfVariables]
+              = "FLOW_INDIR[" + std::to_string(Interco) + "]";
             logs.debug() << NumberOfVariables << " indirect flow[" << Interco << "]. ";
             NumberOfVariables++;
 

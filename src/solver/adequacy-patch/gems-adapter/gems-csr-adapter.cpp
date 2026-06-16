@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <antares/expressions/nodes/AllTimeSumNode.h>
 #include <antares/expressions/nodes/DivisionNode.h>
 #include <antares/expressions/nodes/EqualNode.h>
 #include <antares/expressions/nodes/GreaterThanOrEqualNode.h>
@@ -282,7 +283,7 @@ double GemsCsrAdapter::resolveParameter(const ModelerStudy::SystemModel::Compone
     case Optimisation::VariabilityType::CONSTANT_IN_TIME_AND_SCENARIO:
         return std::stod(ptv.value);
     case Optimisation::VariabilityType::VARYING_IN_TIME_ONLY:
-        return csrCtx_.dataSeries->getData(ptv.value, 0, hour);
+        return csrCtx_.dataSeries->getData(ptv.value, 1, hour);
     case Optimisation::VariabilityType::VARYING_IN_SCENARIO_ONLY:
         return csrCtx_.dataSeries->getData(ptv.value, tsNumber, 0);
     case Optimisation::VariabilityType::VARYING_IN_TIME_AND_SCENARIO:
@@ -413,6 +414,12 @@ GemsCsrAdapter::LinearExpr GemsCsrAdapter::evalExpr(
         return result;
     }
 
+    // AllTimeSumNode wraps a time-sum expression; evaluated at a single hour, treat as its child.
+    if (const auto* ats = dynamic_cast<const AllTimeSumNode*>(node))
+    {
+        return evalExpr(ats->child(), component, hour, tsNumber);
+    }
+
     throw std::runtime_error("Unsupported node type '" + node->name()
                              + "' in constraint for component '" + component.Id() + "'");
 }
@@ -523,6 +530,48 @@ int GemsCsrAdapter::countExtraVariables() const
         }
     }
     return count;
+}
+
+std::vector<LinearCostTerm> GemsCsrAdapter::linearCostsForHour(int globalHour, int mcYear) const
+{
+    const unsigned int uHour = static_cast<unsigned int>(globalHour);
+    const unsigned int tsNumber = static_cast<unsigned int>(mcYear + 1);
+
+    std::vector<LinearCostTerm> costs;
+    for (const auto& component : system_.Components())
+    {
+        const auto* model = component.getModel();
+        if (!model)
+            continue;
+        for (const auto& obj : model->Objectives())
+        {
+            if (!std::regex_search(obj.Id(), constraintFilter_))
+                continue;
+            const auto* root = obj.expression().RootNode();
+            if (!root)
+                continue;
+            try
+            {
+                auto expr = evalExpr(root, component, uHour, tsNumber);
+                for (const auto& [col, coeff] : expr.colTerms)
+                {
+                    if (coeff != 0.0)
+                    {
+                        costs.push_back({col, coeff});
+                        logs.debug() << "[gems-csr-adapter] linearCostsForHour h=" << globalHour
+                                     << " col=" << col << " cost=" << coeff;
+                    }
+                }
+            }
+            catch (const std::exception& e)
+            {
+                logs.warning() << "[gems-csr-adapter] linearCostsForHour: failed to evaluate"
+                               << " objective '" << obj.Id() << "' component '" << component.Id()
+                               << "': " << e.what();
+            }
+        }
+    }
+    return costs;
 }
 
 int GemsCsrAdapter::countMatchingConstraints() const

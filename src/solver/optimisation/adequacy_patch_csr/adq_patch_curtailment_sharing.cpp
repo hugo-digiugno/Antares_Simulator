@@ -27,12 +27,14 @@ public:
     {
     }
 
-    int allocateColumn(const std::string& /*name*/, double lb, double ub) override
+    int allocateColumn(const std::string& name, double lb, double ub) override
     {
         int col = nextIdx_++;
         pa_.Xmin[col] = lb;
         pa_.Xmax[col] = ub;
         pa_.TypeDeVariable[col] = VARIABLE_NON_BORNEE;
+        if (col < static_cast<int>(pa_.NomDesVariables.size()))
+            pa_.NomDesVariables[col] = name;
         return col;
     }
 
@@ -267,6 +269,7 @@ void HourlyCSRProblem::setProblemCost()
     {
         setLinearCost();
     }
+    setGemsLinearCost();
 }
 
 void HourlyCSRProblem::solveProblem(uint week, int year, const OptimizationOptions& options)
@@ -287,6 +290,36 @@ void HourlyCSRProblem::run(uint week, uint year)
     buildProblemConstraintsLHS();
     setVariableBounds();
     buildProblemConstraintsRHS();
+
+    // Dump constraint matrix with actual RHS (after RHS is set)
+    {
+        logs.info() << "[ADQ-DEBUG][CSR-CON] h=" << triggeredHour
+                    << " nCon=" << problemeAResoudre_.NombreDeContraintes
+                    << " nVars=" << problemeAResoudre_.NombreDeVariables;
+        for (int row = 0; row < problemeAResoudre_.NombreDeContraintes; ++row)
+        {
+            const char* sense = "?";
+            if (row < static_cast<int>(problemeAResoudre_.Sens.size()))
+            {
+                switch (problemeAResoudre_.Sens[row])
+                {
+                case '<': sense = "LE"; break;
+                case '>': sense = "GE"; break;
+                case '=': sense = "EQ"; break;
+                }
+            }
+            const std::string& name
+              = (row < static_cast<int>(problemeAResoudre_.NomDesContraintes.size()))
+                  ? problemeAResoudre_.NomDesContraintes[row]
+                  : "?";
+            const double rhs = (row < static_cast<int>(problemeAResoudre_.SecondMembre.size()))
+                                 ? problemeAResoudre_.SecondMembre[row]
+                                 : 0.0;
+            logs.info() << "[ADQ-DEBUG][CSR-CON]   row=" << row << " name=" << name
+                        << " sense=" << sense << " rhs=" << rhs;
+        }
+    }
+
     setProblemCost();
     solveProblem(week, year, solverOptions_);
 
@@ -463,17 +496,69 @@ void HourlyCSRProblem::setRHSgemsFbConstraintsValue()
         return;
     }
 
+    // Build area-name → area-index lookup for LP exchange values.
+    const auto outsideCols = rtd->gemsCsrAdapter->outsideAreaColumnMap();
+    // Map areaName → Antares area index
+    std::map<std::string, int> areaNameToIdx;
+    for (uint32_t a = 0; a < problemeHebdo_->NombreDePays; ++a)
+    {
+        if (problemeHebdo_->NomsDesPays[a])
+            areaNameToIdx[problemeHebdo_->NomsDesPays[a]] = static_cast<int>(a);
+    }
+
     const auto rows = rtd->gemsCsrAdapter->rowsForHour(globalTriggeredHour, mcYear_);
     for (size_t i = 0; i < rows.size() && i < gemsFbConstraintRows_.size(); ++i)
     {
         const int csrRow = gemsFbConstraintRows_[i];
-        if (csrRow >= 0)
+        if (csrRow < 0)
+            continue;
+
+        // 1. Raw RAM from GEMS model expression
+        double rhs = rows[i].rhs;
+
+        // 2. Add back outside-area LP contributions for LE/GE rows only (PTDF constraints).
+        //    EQ rows (exchange_balance, split_*) keep outside-area terms in LHS → no adjustment.
+        //    adjusted_RHS = raw_RHS + sum_outside(PTDF_i × lpVal_i)
+        //    Note: ORG formula: RHS -= PTDF × ValeurDuFlux where ValeurDuFlux = -lpVal,
+        //    which is equivalent to RHS += PTDF × lpVal.
+        const bool isInequalityRow = (rows[i].sense == Antares::AdequacyPatch::CsrRowSense::LE
+                                      || rows[i].sense == Antares::AdequacyPatch::CsrRowSense::GE);
+        if (!isInequalityRow)
         {
-            problemeAResoudre_.SecondMembre[csrRow] = rows[i].rhs;
+            problemeAResoudre_.SecondMembre[csrRow] = rhs;
             logs.info() << "[GEMS-VERIFY][H3] setRHS: rowIdx=" << i
                         << " csrRow=" << csrRow
                         << " id=" << rows[i].constraintId
-                        << " rhs=" << rows[i].rhs;
+                        << " rawRhs=" << rhs
+                        << " adjustedRhs=" << rhs << " (EQ row, no outside adjustment)";
+            continue;
         }
+        for (const auto& term : rows[i].terms)
+        {
+            auto colIt = outsideCols.find(term.column);
+            if (colIt == outsideCols.end())
+                continue;
+            auto areaIt = areaNameToIdx.find(colIt->second);
+            if (areaIt == areaNameToIdx.end())
+                continue;
+            const int areaIdx = areaIt->second;
+            const double lpVal = problemeHebdo_->ResultatsHoraires[areaIdx]
+                                   .ValeursHorairesNetechangeModeler[triggeredHour];
+            const double correction = term.coefficient * lpVal;
+            logs.info() << "[ADQ-DEBUG][GEMS-RHS-ADJ] h=" << triggeredHour
+                        << " cnec=" << rows[i].constraintId
+                        << " area=" << colIt->second
+                        << " ptdf=" << term.coefficient
+                        << " lpVal=" << lpVal
+                        << " correction=" << correction;
+            rhs += correction;
+        }
+
+        problemeAResoudre_.SecondMembre[csrRow] = rhs;
+        logs.info() << "[GEMS-VERIFY][H3] setRHS: rowIdx=" << i
+                    << " csrRow=" << csrRow
+                    << " id=" << rows[i].constraintId
+                    << " rawRhs=" << rows[i].rhs
+                    << " adjustedRhs=" << rhs;
     }
 }

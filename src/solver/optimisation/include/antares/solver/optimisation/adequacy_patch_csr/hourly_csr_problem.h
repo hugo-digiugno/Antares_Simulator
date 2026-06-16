@@ -121,6 +121,7 @@ private:
     // Costs
     void setQuadraticCost();
     void setLinearCost();
+    void setGemsLinearCost();
 
     const Solver::Optimization::OptimizationOptions& solverOptions_;
 

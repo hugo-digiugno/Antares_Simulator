@@ -66,6 +66,13 @@ struct VarBound
     double ub;
 };
 
+// Per-variable linear cost term evaluated from the GEMS objective-contribution for a given hour.
+struct LinearCostTerm
+{
+    int col;
+    double cost;
+};
+
 class GemsCsrAdapter final
 {
 public:
@@ -79,6 +86,10 @@ public:
     // Returns (col, lb, ub) for every extra variable that has non-trivial model bounds.
     // Variables without explicit bounds in the model are omitted (caller keeps ±inf).
     std::vector<VarBound> variableBoundsForHour(int globalHour, int mcYear) const;
+    // Returns per-variable linear cost coefficients extracted from the GEMS model's
+    // objective-contributions (id="objective") for the given hour/scenario.
+    // Only valid after registerExtraVariables() has been called.
+    std::vector<LinearCostTerm> linearCostsForHour(int globalHour, int mcYear) const;
     int countMatchingConstraints() const;
     // Returns the number of extra LP columns registerExtraVariables() will allocate.
     int countExtraVariables() const;
@@ -97,6 +108,15 @@ public:
     const std::vector<AreaFlowContribution>& outsideAreaFlowContributions() const
     {
         return outsideAreaFlowContribs_;
+    }
+    // Returns { csrColumn → areaName } for each outside-area GEMS exchange variable.
+    // Used to drop outside-area terms from fbc_ LHS and adjust RHS with LP values.
+    std::map<int, std::string> outsideAreaColumnMap() const
+    {
+        std::map<int, std::string> m;
+        for (const auto& c : outsideAreaFlowContribs_)
+            m[c.csrColumn] = c.areaName;
+        return m;
     }
 
 private:

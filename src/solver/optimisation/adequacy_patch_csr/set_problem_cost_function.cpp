@@ -6,6 +6,8 @@
 #include "antares/solver/simulation/adequacy_patch_runtime_data.h"
 #include "antares/solver/simulation/sim_structure_probleme_economique.h"
 
+#include "antares/solver/adequacy-patch/gems-csr-adapter.h"
+
 namespace
 {
 
@@ -134,6 +136,26 @@ void HourlyCSRProblem::setLinearCost()
                                                        * coeff;
             }
             logs.debug() << var << ". Linear C = " << problemeAResoudre_.CoutLineaire[var];
+        }
+    }
+}
+
+void HourlyCSRProblem::setGemsLinearCost()
+{
+    const auto* rtd = problemeHebdo_->adequacyPatchRuntimeData.get();
+    if (!rtd || !rtd->useGemsFbConstraints || !rtd->gemsCsrAdapter)
+        return;
+
+    const auto costs = rtd->gemsCsrAdapter->linearCostsForHour(globalTriggeredHour, mcYear_);
+    for (const auto& term : costs)
+    {
+        if (term.col >= 0 && term.col < problemeAResoudre_.NombreDeVariables)
+        {
+            problemeAResoudre_.CoutLineaire[term.col] = term.cost;
+            logs.info() << "[ADQ-DEBUG][GEMS-LINEAR-COST] col=" << term.col
+                        << " name=" << (term.col < static_cast<int>(problemeAResoudre_.NomDesVariables.size())
+                                        ? problemeAResoudre_.NomDesVariables[term.col] : "?")
+                        << " cost=" << term.cost;
         }
     }
 }

@@ -146,12 +146,29 @@ void CsrQuadraticProblem::setFlowBasedConstraints(ConstraintBuilder& builder)
     auto& rowIndices = hourlyCsrProblem_.gemsFbConstraintRows_;
     rowIndices.clear();
 
+    // Outside-area columns (dkw0, ie00): dropped from fbc_ LHS, compensated in RHS.
+    const auto outsideCols = rtd->gemsCsrAdapter->outsideAreaColumnMap();
+
     const auto rows = rtd->gemsCsrAdapter->rowsForHour(globalHour, mcYear);
     for (const auto& row : rows)
     {
         builder.updateHourWithinWeek(static_cast<unsigned>(hour));
+        // Only drop outside-area terms from LE/GE PTDF constraints (not EQ structural ones).
+        const bool isInequalityRow = (row.sense == Antares::AdequacyPatch::CsrRowSense::LE
+                                      || row.sense == Antares::AdequacyPatch::CsrRowSense::GE);
         for (const auto& term : row.terms)
         {
+            auto it = outsideCols.find(term.column);
+            if (it != outsideCols.end() && isInequalityRow)
+            {
+                logs.info() << "[ADQ-DEBUG][GEMS-BC-DROP] h=" << hour
+                            << " cnec=" << row.constraintId
+                            << " area=" << it->second
+                            << " col=" << term.column
+                            << " ptdf=" << term.coefficient
+                            << " (outside-area term excluded from fbc_ LHS, compensated in RHS)";
+                continue;
+            }
             builder.rawTerm(term.column, term.coefficient);
         }
 
@@ -211,35 +228,6 @@ void CsrQuadraticProblem::buildConstraintMatrix()
     setMaxEnsLoadConstraints(builder);
     setBindingConstraints(builder);
     setFlowBasedConstraints(builder);
-
-    // Dump all constraint rows for validation
-    const int h = hourlyCsrProblem_.triggeredHour;
-    logs.info() << "[ADQ-DEBUG][CSR-CON] h=" << h
-                << " nCon=" << problemeAResoudre_.NombreDeContraintes
-                << " nVars=" << problemeAResoudre_.NombreDeVariables;
-    for (int row = 0; row < problemeAResoudre_.NombreDeContraintes; ++row)
-    {
-        const char* sense = "?";
-        if (row < static_cast<int>(problemeAResoudre_.Sens.size()))
-        {
-            switch (problemeAResoudre_.Sens[row])
-            {
-            case '<': sense = "LE"; break;
-            case '>': sense = "GE"; break;
-            case '=': sense = "EQ"; break;
-            }
-        }
-        const std::string& name = (row < static_cast<int>(problemeAResoudre_.NomDesContraintes.size()))
-                                    ? problemeAResoudre_.NomDesContraintes[row]
-                                    : "?";
-        const double rhs = (row < static_cast<int>(problemeAResoudre_.SecondMembre.size()))
-                             ? problemeAResoudre_.SecondMembre[row]
-                             : 0.0;
-        logs.info() << "[ADQ-DEBUG][CSR-CON]   row=" << row
-                    << " name=" << name
-                    << " sense=" << sense
-                    << " rhs=" << rhs;
-    }
 }
 
 } // namespace Antares::Solver::Optimization
