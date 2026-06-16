@@ -1,6 +1,8 @@
 // Copyright 2007-2026, RTE (https://www.rte-france.com)
 // SPDX-License-Identifier: MPL-2.0
 
+#include <antares/logs/logs.h>
+
 #include "antares/solver/optimisation/adequacy_patch_csr/constraints/CsrBindingConstraintHour.h"
 
 void CsrBindingConstraintHour::add(int CntCouplante)
@@ -22,10 +24,25 @@ void CsrBindingConstraintHour::add(int CntCouplante)
         double Poids = data.MatriceDesContraintesCouplantes[CntCouplante]
                          .PoidsDeLInterconnexion[Index];
 
-        if (data.originAreaMode[Interco] == Data::AdequacyPatch::physicalAreaInsideAdqPatch
-            && data.extremityAreaMode[Interco] == Data::AdequacyPatch::physicalAreaInsideAdqPatch)
+        const bool originInside
+          = data.originAreaMode[Interco] == Data::AdequacyPatch::physicalAreaInsideAdqPatch;
+        const bool extremityInside
+          = data.extremityAreaMode[Interco] == Data::AdequacyPatch::physicalAreaInsideAdqPatch;
+
+        if (originInside && extremityInside)
         {
             builder.NTCDirect(Interco, Poids);
+        }
+        else
+        {
+            Antares::logs.info()
+              << "[ADQ-DEBUG][ORG-BC-DROP] h=" << data.hour
+              << " cnec=" << CntCouplante
+              << " interco=" << Interco
+              << " ptdf=" << Poids
+              << " originMode=" << static_cast<int>(data.originAreaMode[Interco])
+              << " extremityMode=" << static_cast<int>(data.extremityAreaMode[Interco])
+              << " (outside-area term excluded from CSR binding constraint)";
         }
     }
 

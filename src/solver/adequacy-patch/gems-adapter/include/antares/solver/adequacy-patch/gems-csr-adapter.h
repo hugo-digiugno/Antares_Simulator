@@ -58,6 +58,14 @@ struct CsrProblemContext
     const Optimisation::LinearProblemApi::ILinearProblemData* dataSeries = nullptr;
 };
 
+// Per-variable CSR QP bounds resolved for a specific hour/scenario.
+struct VarBound
+{
+    int col;
+    double lb;
+    double ub;
+};
+
 class GemsCsrAdapter final
 {
 public:
@@ -68,17 +76,27 @@ public:
 
     void registerExtraVariables(CsrProblemBuilder& builder);
     std::vector<CsrRow> rowsForHour(int hour, int mcYear) const;
+    // Returns (col, lb, ub) for every extra variable that has non-trivial model bounds.
+    // Variables without explicit bounds in the model are omitted (caller keeps ±inf).
+    std::vector<VarBound> variableBoundsForHour(int globalHour, int mcYear) const;
     int countMatchingConstraints() const;
     // Returns the number of extra LP columns registerExtraVariables() will allocate.
     int countExtraVariables() const;
     // Returns true if any area-connected port field definitions were found.
     // Usable before registerExtraVariables() (based on constructor-time scan).
     bool hasAreaFlowContributions() const { return !pendingAreaFlows_.empty(); }
-    // Returns per-area GEMS exchange contributions for the CSR area balance.
+    // Returns per-area GEMS exchange contributions for inside areas (CSR area balance).
     // Only valid after registerExtraVariables() has been called.
     const std::vector<AreaFlowContribution>& areaFlowContributions() const
     {
         return areaFlowContribs_;
+    }
+    // Returns per-area GEMS exchange contributions for outside areas.
+    // Used by updateGemsExchangeAfterCSR() to write back QP solution for outside areas.
+    // Only valid after registerExtraVariables() has been called.
+    const std::vector<AreaFlowContribution>& outsideAreaFlowContributions() const
+    {
+        return outsideAreaFlowContribs_;
     }
 
 private:
@@ -121,7 +139,9 @@ private:
     std::regex constraintFilter_;
     std::map<VarKey, int> varIdToColIdx_;
     std::vector<PendingAreaFlow> pendingAreaFlows_;
+    std::vector<PendingAreaFlow> pendingOutsideAreaFlows_;
     std::vector<AreaFlowContribution> areaFlowContribs_;
+    std::vector<AreaFlowContribution> outsideAreaFlowContribs_;
     bool extraVarsRegistered_ = false;
     int extraVarCount_ = 0;
 };

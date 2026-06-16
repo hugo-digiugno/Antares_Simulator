@@ -106,10 +106,12 @@ std::tuple<double, double, double> calculateAreaFlowBalance(PROBLEME_HEBDO* prob
         Interco = problemeHebdo->IndexSuivantIntercoExtremite[Interco];
     }
 
+    double gemsContrib = 0.0;
     if (problemeHebdo->modelerData)
     {
-        netPositionInit += problemeHebdo->ResultatsHoraires[Area]
-                             .ValeursHorairesNetechangeModeler[hour];
+        gemsContrib = problemeHebdo->ResultatsHoraires[Area]
+                        .ValeursHorairesNetechangeModeler[hour];
+        netPositionInit += gemsContrib;
     }
 
     double ensInit = problemeHebdo->ResultatsHoraires[Area]
@@ -117,11 +119,30 @@ std::tuple<double, double, double> calculateAreaFlowBalance(PROBLEME_HEBDO* prob
     if (!setNTCOutsideToInsideToZero)
     {
         densNew = std::max(0.0, ensInit + netPositionInit + flowsNode1toNodeA);
+        if (problemeHebdo->modelerData && (ensInit > 0.0 || gemsContrib != 0.0))
+        {
+            logs.info() << "[GEMS-VERIFY][H4] areaFlowBalance area=" << Area
+                        << " h=" << hour << " ensInit=" << ensInit
+                        << " netPosNTC=" << (netPositionInit - gemsContrib)
+                        << " gemsContrib=" << gemsContrib
+                        << " netPosTotal=" << netPositionInit
+                        << " flowsOutside=" << flowsNode1toNodeA
+                        << " densNew=" << densNew;
+        }
         return std::make_tuple(netPositionInit, densNew, netPositionInit + flowsNode1toNodeA);
     }
     else
     {
         densNew = std::max(0.0, ensInit + netPositionInit);
+        if (problemeHebdo->modelerData && (ensInit > 0.0 || gemsContrib != 0.0))
+        {
+            logs.info() << "[GEMS-VERIFY][H4] areaFlowBalance area=" << Area
+                        << " h=" << hour << " ensInit=" << ensInit
+                        << " netPosNTC=" << (netPositionInit - gemsContrib)
+                        << " gemsContrib=" << gemsContrib
+                        << " netPosTotal=" << netPositionInit
+                        << " (outsideLinksZeroed) densNew=" << densNew;
+        }
         return std::make_tuple(netPositionInit, densNew, netPositionInit);
     }
 }
@@ -153,6 +174,21 @@ void HourlyCSRProblem::calculateCsrParameters()
                                     .ValeursHorairesDeDefaillanceNegative[hour];
 
             rhsAreaBalanceValues[Area] = ensInit + netPositionInit - spillageInit;
+            const double dens = std::max(0.0, ensInit + netPositionInit);
+            logs.info() << "[ADQ-DEBUG][LMR] area='" << problemeHebdo_->NomsDesPays[Area]
+                        << "' h=" << hour
+                        << " ENS_init=" << ensInit
+                        << " netPosInit=" << netPositionInit
+                        << " DENS=" << dens
+                        << " spillageInit=" << spillageInit
+                        << " csrRHS=" << rhsAreaBalanceValues[Area];
+            logs.info() << "[GEMS-VERIFY][H2] csrRHS area=" << Area
+                        << " (" << problemeHebdo_->NomsDesPays[Area] << ")"
+                        << " h=" << hour
+                        << " ensInit=" << ensInit
+                        << " netPosInit=" << netPositionInit
+                        << " spillageInit=" << spillageInit
+                        << " RHS=" << rhsAreaBalanceValues[Area];
         }
     }
 }
@@ -253,6 +289,48 @@ void HourlyCSRProblem::run(uint week, uint year)
     buildProblemConstraintsRHS();
     setProblemCost();
     solveProblem(week, year, solverOptions_);
+
+    // Dump full CSR QP solution for validation
+    {
+        logs.info() << "[ADQ-DEBUG][CSR-SOL] h=" << triggeredHour
+                    << " nVars=" << problemeAResoudre_.NombreDeVariables;
+        for (int col = 0; col < problemeAResoudre_.NombreDeVariables; ++col)
+        {
+            const std::string& varName
+              = (col < static_cast<int>(problemeAResoudre_.NomDesVariables.size()))
+                  ? problemeAResoudre_.NomDesVariables[col]
+                  : "?";
+            logs.info() << "[ADQ-DEBUG][CSR-SOL]   col=" << col
+                        << " name=" << varName
+                        << " X=" << problemeAResoudre_.X[col];
+        }
+        // GEMS exchange contributions (inside + outside) from QP solution
+        const auto* rtd = problemeHebdo_->adequacyPatchRuntimeData.get();
+        if (rtd && rtd->useGemsFbConstraints && rtd->gemsCsrAdapter)
+        {
+            for (const auto& contrib : rtd->gemsCsrAdapter->areaFlowContributions())
+            {
+                logs.info() << "[GEMS-VERIFY][H2] QPsol h=" << triggeredHour
+                            << " area='" << contrib.areaName << "' (inside)"
+                            << " col=" << contrib.csrColumn
+                            << " X=" << problemeAResoudre_.X[contrib.csrColumn]
+                            << " coeff=" << contrib.coefficient
+                            << " netContrib="
+                            << (contrib.coefficient * problemeAResoudre_.X[contrib.csrColumn]);
+            }
+            for (const auto& contrib : rtd->gemsCsrAdapter->outsideAreaFlowContributions())
+            {
+                logs.info() << "[ADQ-DEBUG][CSR-SOL] QPsol h=" << triggeredHour
+                            << " area='" << contrib.areaName << "' (outside)"
+                            << " col=" << contrib.csrColumn
+                            << " X=" << problemeAResoudre_.X[contrib.csrColumn]
+                            << " coeff=" << contrib.coefficient
+                            << " netContrib="
+                            << (contrib.coefficient * problemeAResoudre_.X[contrib.csrColumn]);
+            }
+        }
+    }
+
     updateGemsExchangeAfterCSR();
 }
 
@@ -262,8 +340,9 @@ void HourlyCSRProblem::updateGemsExchangeAfterCSR()
     if (!rtd || !rtd->useGemsFbConstraints || !rtd->gemsCsrAdapter)
         return;
 
-    const auto& contribs = rtd->gemsCsrAdapter->areaFlowContributions();
-    if (contribs.empty())
+    const auto& insideContribs = rtd->gemsCsrAdapter->areaFlowContributions();
+    const auto& outsideContribs = rtd->gemsCsrAdapter->outsideAreaFlowContributions();
+    if (insideContribs.empty())
         return;
 
     // Map area name → area index
@@ -271,20 +350,60 @@ void HourlyCSRProblem::updateGemsExchangeAfterCSR()
     for (uint32_t i = 0; i < problemeHebdo_->NombreDePays; ++i)
         nameToIdx[problemeHebdo_->NomsDesPays[i]] = static_cast<int>(i);
 
-    // Reset ValeursHorairesNetechangeModeler for this hour for every area
+    // Log LP values for all areas before overwrite
+    logs.info() << "[ADQ-DEBUG][WRITEBACK] preWrite NetechangeModeler h=" << triggeredHour;
+    for (uint32_t i = 0; i < problemeHebdo_->NombreDePays; ++i)
+    {
+        const int mode = static_cast<int>(rtd->areaMode[i]);
+        const double val = problemeHebdo_->ResultatsHoraires[i]
+                             .ValeursHorairesNetechangeModeler[triggeredHour];
+        logs.info() << "[ADQ-DEBUG][WRITEBACK]   area='" << problemeHebdo_->NomsDesPays[i]
+                    << "' mode=" << mode << " lpVal=" << val;
+    }
+
+    // Reset all areas then write inside + outside from QP solution
     for (uint32_t i = 0; i < problemeHebdo_->NombreDePays; ++i)
         problemeHebdo_->ResultatsHoraires[i].ValeursHorairesNetechangeModeler[triggeredHour] = 0.0;
 
-    // Accumulate the CSR-solved GEMS exchange into each area's slot
-    for (const auto& contrib : contribs)
+    auto writeBack = [&](const std::vector<Antares::AdequacyPatch::AreaFlowContribution>& contribs,
+                         const char* tag)
     {
-        auto it = nameToIdx.find(contrib.areaName);
-        if (it == nameToIdx.end())
-            continue;
-        double val = problemeAResoudre_.X[contrib.csrColumn];
-        problemeHebdo_->ResultatsHoraires[it->second]
-            .ValeursHorairesNetechangeModeler[triggeredHour] += contrib.coefficient * val;
+        for (const auto& contrib : contribs)
+        {
+            auto it = nameToIdx.find(contrib.areaName);
+            if (it == nameToIdx.end())
+                continue;
+            const double qpVal = problemeAResoudre_.X[contrib.csrColumn];
+            const double written = contrib.coefficient * qpVal;
+            problemeHebdo_->ResultatsHoraires[it->second]
+              .ValeursHorairesNetechangeModeler[triggeredHour] += written;
+            logs.info() << "[ADQ-DEBUG][WRITEBACK] " << tag
+                        << " area='" << contrib.areaName
+                        << "' col=" << contrib.csrColumn
+                        << " qpX=" << qpVal
+                        << " coeff=" << contrib.coefficient
+                        << " written=" << written;
+        }
+    };
+
+    writeBack(insideContribs, "inside");
+    writeBack(outsideContribs, "outside");
+
+    // Log post-write values and compute energy balance check
+    logs.info() << "[ADQ-DEBUG][WRITEBACK] postWrite NetechangeModeler h=" << triggeredHour;
+    double balanceSum = 0.0;
+    for (uint32_t i = 0; i < problemeHebdo_->NombreDePays; ++i)
+    {
+        const int mode = static_cast<int>(rtd->areaMode[i]);
+        const double val = problemeHebdo_->ResultatsHoraires[i]
+                             .ValeursHorairesNetechangeModeler[triggeredHour];
+        balanceSum += val;
+        logs.info() << "[ADQ-DEBUG][WRITEBACK]   area='" << problemeHebdo_->NomsDesPays[i]
+                    << "' mode=" << mode << " csrVal=" << val;
     }
+    logs.info() << "[ADQ-DEBUG][BALANCE-CHECK] h=" << triggeredHour
+                << " sum_exchange=" << balanceSum
+                << (std::fabs(balanceSum) < 1.0 ? " OK" : " VIOLATION");
 }
 
 void HourlyCSRProblem::setBoundsOnGemsFbExtraVars()
@@ -294,16 +413,8 @@ void HourlyCSRProblem::setBoundsOnGemsFbExtraVars()
     {
         return;
     }
-    // Extra GEMS columns sit above the legacy variable range.
-    // Their bounds were written by CsrColumnAllocator during buildProblemVariables();
-    // re-apply them here so they survive the AdresseOuPlacerLaValeurDesVariablesOptimisees
-    // reset loop at the top of setVariableBounds().
-    // Physical bounds come from the FB constraints injected by setFlowBasedConstraints().
-    //
-    // TODO(warm-start): initialise X[col] to the pre-CSR LP solution value for each GEMS
-    // variable so the QP solver starts from a feasible interior point rather than the origin.
-    // Requires GemsCsrAdapter to expose per-column pre-CSR values (time-indexed), which in
-    // turn needs OptimEntityContainer accessible from the CSR context.
+    // Step 1: default all extra GEMS columns to unbounded (they survive the
+    // AdresseOuPlacerLaValeurDesVariablesOptimisees reset at the top of setVariableBounds()).
     constexpr double kInf = 1e20;
     const int legacyEnd = problemeAResoudre_.NombreDeVariables
                           - rtd->gemsCsrAdapter->countExtraVariables();
@@ -313,6 +424,34 @@ void HourlyCSRProblem::setBoundsOnGemsFbExtraVars()
         problemeAResoudre_.Xmax[col] = kInf;
         problemeAResoudre_.TypeDeVariable[col] = VARIABLE_NON_BORNEE;
         problemeAResoudre_.X[col] = 0.0;
+    }
+
+    // Step 2: apply per-hour model bounds for variables that have explicit bounds.
+    const auto varBounds
+      = rtd->gemsCsrAdapter->variableBoundsForHour(globalTriggeredHour, mcYear_);
+    for (const auto& vb : varBounds)
+    {
+        problemeAResoudre_.Xmin[vb.col] = vb.lb;
+        problemeAResoudre_.Xmax[vb.col] = vb.ub;
+        const bool hasBothSides = (vb.lb > -kInf) && (vb.ub < kInf);
+        const bool hasLbOnly = (vb.lb > -kInf) && (vb.ub >= kInf);
+        if (hasBothSides)
+            problemeAResoudre_.TypeDeVariable[vb.col] = VARIABLE_BORNEE_DES_DEUX_COTES;
+        else if (hasLbOnly)
+            problemeAResoudre_.TypeDeVariable[vb.col] = VARIABLE_BORNEE_INFERIEUREMENT;
+        else
+            problemeAResoudre_.TypeDeVariable[vb.col] = VARIABLE_BORNEE_SUPERIEUREMENT;
+    }
+
+    // Step 3: dump all extra-variable bounds for validation.
+    for (int col = legacyEnd; col < problemeAResoudre_.NombreDeVariables; ++col)
+    {
+        logs.info() << "[ADQ-DEBUG][CSR-VAR] h=" << triggeredHour
+                    << " col=" << col
+                    << " lb=" << problemeAResoudre_.Xmin[col]
+                    << " ub=" << problemeAResoudre_.Xmax[col]
+                    << " type=" << problemeAResoudre_.TypeDeVariable[col]
+                    << " (gems-extra)";
     }
 }
 
@@ -331,8 +470,10 @@ void HourlyCSRProblem::setRHSgemsFbConstraintsValue()
         if (csrRow >= 0)
         {
             problemeAResoudre_.SecondMembre[csrRow] = rows[i].rhs;
-            logs.debug() << csrRow << ": GEMS FB: RHS[" << csrRow
-                         << "] = " << rows[i].rhs;
+            logs.info() << "[GEMS-VERIFY][H3] setRHS: rowIdx=" << i
+                        << " csrRow=" << csrRow
+                        << " id=" << rows[i].constraintId
+                        << " rhs=" << rows[i].rhs;
         }
     }
 }

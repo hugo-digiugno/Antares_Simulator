@@ -60,11 +60,13 @@ void GemsCsrAdapter::buildAreaVarMap()
 
         for (const auto& [portId, areaName] : portToArea)
         {
-            if (csrCtx_.areaToColumnIndex->find(areaName) == csrCtx_.areaToColumnIndex->end())
+            const bool isInsideArea = csrCtx_.areaToColumnIndex
+                                      && csrCtx_.areaToColumnIndex->count(areaName);
+            if (!isInsideArea)
             {
-                logs.warning() << "[gems-csr-adapter] Area '" << areaName << "' (component '"
-                               << component.Id() << "') not in CSR context, skipping";
-                continue;
+                logs.info() << "[gems-csr-adapter] Area '" << areaName << "' (component '"
+                            << component.Id() << "') not in CSR inside-area context"
+                            << " — recording as outside area for post-CSR write-back";
             }
 
             for (const auto& [key, pfd] : pfDefs)
@@ -75,12 +77,30 @@ void GemsCsrAdapter::buildAreaVarMap()
                 }
                 const auto* root = pfd.Definition().RootNode();
 
+                auto tryRecord = [&](VarKey vk, double sign, const std::string& exprDesc)
+                {
+                    if (isInsideArea)
+                    {
+                        pendingAreaFlows_.push_back({areaName, vk, sign});
+                        logs.info() << "[GEMS-VERIFY][H1] buildAreaVarMap: area='" << areaName
+                                    << "' port='" << portId << "' expr=" << exprDesc
+                                    << " inside=true";
+                    }
+                    else
+                    {
+                        pendingOutsideAreaFlows_.push_back({areaName, vk, sign});
+                        logs.info() << "[GEMS-VERIFY][H1] buildAreaVarMap: area='" << areaName
+                                    << "' port='" << portId << "' expr=" << exprDesc
+                                    << " inside=false (outside write-back)";
+                    }
+                };
+
                 // Direct VariableNode: sign = +1
                 if (const auto* varNode
                     = dynamic_cast<const Expressions::Nodes::VariableNode*>(root))
                 {
-                    VarKey vk{component.Id(), varNode->Index()};
-                    pendingAreaFlows_.push_back({areaName, vk, +1.0});
+                    tryRecord({component.Id(), varNode->Index()}, +1.0,
+                              std::string("VariableNode sign=+1 var='") + varNode->value() + "'");
                 }
                 // NegationNode(VariableNode): sign = -1
                 else if (const auto* neg
@@ -89,9 +109,24 @@ void GemsCsrAdapter::buildAreaVarMap()
                     if (const auto* varNode
                         = dynamic_cast<const Expressions::Nodes::VariableNode*>(neg->child()))
                     {
-                        VarKey vk{component.Id(), varNode->Index()};
-                        pendingAreaFlows_.push_back({areaName, vk, -1.0});
+                        tryRecord({component.Id(), varNode->Index()}, -1.0,
+                                  std::string("Neg(VariableNode) sign=-1 var='")
+                                    + varNode->value() + "'");
                     }
+                    else
+                    {
+                        logs.warning() << "[GEMS-VERIFY][H1] buildAreaVarMap: area='" << areaName
+                                       << "' port='" << portId
+                                       << "' expr=Neg(non-VariableNode) — DROPPED, child="
+                                       << neg->child()->name();
+                    }
+                }
+                else
+                {
+                    logs.warning() << "[GEMS-VERIFY][H1] buildAreaVarMap: area='" << areaName
+                                   << "' port='" << portId
+                                   << "' expr=" << root->name()
+                                   << " — unsupported form DROPPED, no area-balance term added";
                 }
             }
         }
@@ -107,11 +142,73 @@ void GemsCsrAdapter::buildAreaFlowMap()
         if (it != varIdToColIdx_.end())
         {
             areaFlowContribs_.push_back({pending.areaName, it->second, pending.sign});
-            logs.debug() << "[gems-csr-adapter] Area '" << pending.areaName
-                         << "' GEMS exchange → CSR col " << it->second
-                         << " (coeff " << pending.sign << ")";
+            logs.info() << "[GEMS-VERIFY][H1] areaFlowContrib (inside): area='" << pending.areaName
+                        << "' csrCol=" << it->second << " coeff=" << pending.sign;
         }
     }
+    for (const auto& pending : pendingOutsideAreaFlows_)
+    {
+        auto it = varIdToColIdx_.find(pending.varKey);
+        if (it != varIdToColIdx_.end())
+        {
+            outsideAreaFlowContribs_.push_back({pending.areaName, it->second, pending.sign});
+            logs.info() << "[GEMS-VERIFY][H1] areaFlowContrib (outside): area='"
+                        << pending.areaName
+                        << "' csrCol=" << it->second << " coeff=" << pending.sign;
+        }
+    }
+}
+
+std::vector<VarBound> GemsCsrAdapter::variableBoundsForHour(int globalHour, int mcYear) const
+{
+    static constexpr double kInf = 1e20;
+    const unsigned int uHour = static_cast<unsigned int>(globalHour);
+    const unsigned int tsNumber = static_cast<unsigned int>(mcYear + 1);
+
+    std::vector<VarBound> bounds;
+
+    for (const auto& component : system_.Components())
+    {
+        const auto* model = component.getModel();
+        if (!model)
+            continue;
+
+        const auto& vars = model->Variables();
+        for (unsigned int idx = 0; idx < vars.size(); ++idx)
+        {
+            VarKey vk{component.Id(), idx};
+            auto it = varIdToColIdx_.find(vk);
+            if (it == varIdToColIdx_.end())
+                continue;
+            const int col = it->second;
+
+            const auto& var = vars[idx];
+            double lb = -kInf;
+            double ub = kInf;
+
+            if (!var.LowerBound().Empty())
+            {
+                auto expr = evalExpr(var.LowerBound().RootNode(), component, uHour, tsNumber);
+                if (expr.colTerms.empty())
+                    lb = expr.constant;
+            }
+            if (!var.UpperBound().Empty())
+            {
+                auto expr = evalExpr(var.UpperBound().RootNode(), component, uHour, tsNumber);
+                if (expr.colTerms.empty())
+                    ub = expr.constant;
+            }
+
+            if (lb > -kInf || ub < kInf)
+            {
+                bounds.push_back({col, lb, ub});
+                logs.debug() << "[gems-csr-adapter] variableBoundsForHour h=" << globalHour
+                             << " var='" << component.Id() << "." << var.Id()
+                             << "' col=" << col << " lb=" << lb << " ub=" << ub;
+            }
+        }
+    }
+    return bounds;
 }
 
 void GemsCsrAdapter::registerExtraVariables(CsrProblemBuilder& builder)
@@ -491,6 +588,19 @@ std::vector<CsrRow> GemsCsrAdapter::rowsForHour(int hour, int mcYear) const
 
             if (buildRow(root, component, row, uHour, tsNumber))
             {
+                const char* senseStr = row.sense == CsrRowSense::LE ? "LE"
+                                     : row.sense == CsrRowSense::GE ? "GE" : "EQ";
+                logs.info() << "[GEMS-VERIFY][H3] rowsForHour h=" << hour
+                            << " mc=" << mcYear << " tsNum=" << tsNumber
+                            << " idx=" << rows.size()
+                            << " id=" << row.constraintId
+                            << " sense=" << senseStr << " rhs=" << row.rhs
+                            << " nterms=" << row.terms.size();
+                for (const auto& t : row.terms)
+                {
+                    logs.info() << "[GEMS-VERIFY][H3]   term col=" << t.column
+                                << " coeff=" << t.coefficient;
+                }
                 rows.push_back(std::move(row));
             }
         }

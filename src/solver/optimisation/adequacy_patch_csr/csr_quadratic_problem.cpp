@@ -160,6 +160,14 @@ void CsrQuadraticProblem::setFlowBasedConstraints(ConstraintBuilder& builder)
             const int csrRow = builder.data.nombreDeContraintes;
             rowIndices.push_back(csrRow);
             builder.data.NomDesContraintes[csrRow] = "gems_" + row.constraintId;
+            const char* senseStr = row.sense == Antares::AdequacyPatch::CsrRowSense::LE ? "LE"
+                                 : row.sense == Antares::AdequacyPatch::CsrRowSense::GE ? "GE"
+                                                                                         : "EQ";
+            logs.info() << "[GEMS-VERIFY][H3] setLHS: rowIdx=" << (rowIndices.size() - 1)
+                        << " csrRow=" << csrRow
+                        << " id=" << row.constraintId
+                        << " sense=" << senseStr
+                        << " nterms=" << row.terms.size();
             switch (row.sense)
             {
             case Antares::AdequacyPatch::CsrRowSense::LE:
@@ -176,6 +184,8 @@ void CsrQuadraticProblem::setFlowBasedConstraints(ConstraintBuilder& builder)
         }
         else
         {
+            logs.warning() << "[GEMS-VERIFY][H3] setLHS: id=" << row.constraintId
+                           << " has 0 terms after builder — pushed csrRow=-1 (skipped)";
             rowIndices.push_back(-1);
         }
     }
@@ -201,6 +211,35 @@ void CsrQuadraticProblem::buildConstraintMatrix()
     setMaxEnsLoadConstraints(builder);
     setBindingConstraints(builder);
     setFlowBasedConstraints(builder);
+
+    // Dump all constraint rows for validation
+    const int h = hourlyCsrProblem_.triggeredHour;
+    logs.info() << "[ADQ-DEBUG][CSR-CON] h=" << h
+                << " nCon=" << problemeAResoudre_.NombreDeContraintes
+                << " nVars=" << problemeAResoudre_.NombreDeVariables;
+    for (int row = 0; row < problemeAResoudre_.NombreDeContraintes; ++row)
+    {
+        const char* sense = "?";
+        if (row < static_cast<int>(problemeAResoudre_.Sens.size()))
+        {
+            switch (problemeAResoudre_.Sens[row])
+            {
+            case '<': sense = "LE"; break;
+            case '>': sense = "GE"; break;
+            case '=': sense = "EQ"; break;
+            }
+        }
+        const std::string& name = (row < static_cast<int>(problemeAResoudre_.NomDesContraintes.size()))
+                                    ? problemeAResoudre_.NomDesContraintes[row]
+                                    : "?";
+        const double rhs = (row < static_cast<int>(problemeAResoudre_.SecondMembre.size()))
+                             ? problemeAResoudre_.SecondMembre[row]
+                             : 0.0;
+        logs.info() << "[ADQ-DEBUG][CSR-CON]   row=" << row
+                    << " name=" << name
+                    << " sense=" << sense
+                    << " rhs=" << rhs;
+    }
 }
 
 } // namespace Antares::Solver::Optimization
