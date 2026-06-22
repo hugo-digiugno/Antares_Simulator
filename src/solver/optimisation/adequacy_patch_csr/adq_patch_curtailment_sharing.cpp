@@ -4,6 +4,7 @@
 #include "antares/solver/optimisation/adequacy_patch_csr/adq_patch_curtailment_sharing.h"
 
 #include <cmath>
+#include <limits>
 #include <spx_constantes_externes.h>
 
 #include "antares/solver/adequacy-patch/gems-csr-adapter.h"
@@ -448,7 +449,10 @@ void HourlyCSRProblem::setBoundsOnGemsFbExtraVars()
     }
     // Step 1: default all extra GEMS columns to unbounded (they survive the
     // AdresseOuPlacerLaValeurDesVariablesOptimisees reset at the top of setVariableBounds()).
-    constexpr double kInf = 1e20;
+    // Aligned with org: literal +/-infinity (org's z_core hub flows are VARIABLE_NON_BORNEE with
+    // +/-inf bounds via set_variable_boundaries.cpp:101-105). Re-testing with the GEMS FB
+    // constraints enabled.
+    constexpr double kInf = std::numeric_limits<double>::infinity();
     const int legacyEnd = problemeAResoudre_.NombreDeVariables
                           - rtd->gemsCsrAdapter->countExtraVariables();
     for (int col = legacyEnd; col < problemeAResoudre_.NombreDeVariables; ++col)
@@ -553,6 +557,14 @@ void HourlyCSRProblem::setRHSgemsFbConstraintsValue()
                         << " correction=" << correction;
             rhs += correction;
         }
+
+        // Mirror org's epsilon relaxation of inequality RHS
+        // (construct_problem_constraints_RHS.cpp:251-258): LE rows are relaxed by +epsilon,
+        // GE rows by -epsilon. EQ rows (exchange_balance / split) are handled above and untouched.
+        if (rows[i].sense == Antares::AdequacyPatch::CsrRowSense::LE)
+            rhs += belowThisThresholdSetToZero;
+        else if (rows[i].sense == Antares::AdequacyPatch::CsrRowSense::GE)
+            rhs -= belowThisThresholdSetToZero;
 
         problemeAResoudre_.SecondMembre[csrRow] = rhs;
         logs.info() << "[GEMS-VERIFY][H3] setRHS: rowIdx=" << i

@@ -3,6 +3,7 @@
 
 #include "antares/solver/adequacy-patch/gems-csr-adapter.h"
 
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -162,7 +163,7 @@ void GemsCsrAdapter::buildAreaFlowMap()
 
 std::vector<VarBound> GemsCsrAdapter::variableBoundsForHour(int globalHour, int mcYear) const
 {
-    static constexpr double kInf = 1e20;
+    static constexpr double kInf = std::numeric_limits<double>::infinity();
     const unsigned int uHour = static_cast<unsigned int>(globalHour);
     const unsigned int tsNumber = static_cast<unsigned int>(mcYear + 1);
 
@@ -246,7 +247,7 @@ void GemsCsrAdapter::registerExtraVariables(CsrProblemBuilder& builder)
                 continue;
             }
             const std::string colName = component.Id() + "." + vars[idx].Id();
-            static constexpr double kInf = 1e20;
+            static constexpr double kInf = std::numeric_limits<double>::infinity();
             int col = builder.allocateColumn(colName, -kInf, kInf);
             varIdToColIdx_[vk] = col;
             ++count;
