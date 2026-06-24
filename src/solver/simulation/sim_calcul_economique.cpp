@@ -97,6 +97,7 @@ void SIM_InitialisationProblemeHebdo(Study& study,
         problem.adequacyPatchRuntimeData = std::make_shared<AdequacyPatchRuntimeData>(
           study.areas,
           study.runtime.areaLink);
+        problem.adequacyPatchRuntimeData->csrDebugLogs = parameters.adqPatchParams.csrDebugLogs;
 
         const auto& csr = parameters.adqPatchParams.curtailmentSharing;
         if (csr.useGemsFbConstraints && problem.modelerData && problem.modelerData->system)
@@ -124,7 +125,8 @@ void SIM_InitialisationProblemeHebdo(Study& study,
             auto adapter = std::make_shared<Antares::AdequacyPatch::GemsCsrAdapter>(
               *problem.modelerData->system,
               ctx,
-              filterRegex);
+              filterRegex,
+              parameters.adqPatchParams.csrDebugLogs);
 
             const int nMatched = adapter->countMatchingConstraints();
             logs.info() << "[adq-patch] GEMS FB constraints enabled — " << nMatched

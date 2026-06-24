@@ -1326,6 +1326,7 @@ void Parameters::validateOptions(const StudyLoadOptions& options)
     {
         derated = true;
     }
+    adqPatchParams.csrDebugLogs = options.adqPatchDebugLogs;
     // forcing value
     if (options.nbYears != 0)
     {

@@ -122,7 +122,9 @@ std::tuple<double, double, double> calculateAreaFlowBalance(PROBLEME_HEBDO* prob
     if (!setNTCOutsideToInsideToZero)
     {
         densNew = std::max(0.0, ensInit + netPositionInit + flowsNode1toNodeA);
-        if (problemeHebdo->modelerData && (ensInit > 0.0 || gemsContrib != 0.0))
+        if (problemeHebdo->adequacyPatchRuntimeData
+            && problemeHebdo->adequacyPatchRuntimeData->csrDebugLogs && problemeHebdo->modelerData
+            && (ensInit > 0.0 || gemsContrib != 0.0))
         {
             logs.info() << "[GEMS-VERIFY][H4] areaFlowBalance area=" << Area
                         << " h=" << hour << " ensInit=" << ensInit
@@ -137,7 +139,9 @@ std::tuple<double, double, double> calculateAreaFlowBalance(PROBLEME_HEBDO* prob
     else
     {
         densNew = std::max(0.0, ensInit + netPositionInit);
-        if (problemeHebdo->modelerData && (ensInit > 0.0 || gemsContrib != 0.0))
+        if (problemeHebdo->adequacyPatchRuntimeData
+            && problemeHebdo->adequacyPatchRuntimeData->csrDebugLogs && problemeHebdo->modelerData
+            && (ensInit > 0.0 || gemsContrib != 0.0))
         {
             logs.info() << "[GEMS-VERIFY][H4] areaFlowBalance area=" << Area
                         << " h=" << hour << " ensInit=" << ensInit
@@ -177,21 +181,24 @@ void HourlyCSRProblem::calculateCsrParameters()
                                     .ValeursHorairesDeDefaillanceNegative[hour];
 
             rhsAreaBalanceValues[Area] = ensInit + netPositionInit - spillageInit;
-            const double dens = std::max(0.0, ensInit + netPositionInit);
-            logs.info() << "[ADQ-DEBUG][LMR] area='" << problemeHebdo_->NomsDesPays[Area]
-                        << "' h=" << hour
-                        << " ENS_init=" << ensInit
-                        << " netPosInit=" << netPositionInit
-                        << " DENS=" << dens
-                        << " spillageInit=" << spillageInit
-                        << " csrRHS=" << rhsAreaBalanceValues[Area];
-            logs.info() << "[GEMS-VERIFY][H2] csrRHS area=" << Area
-                        << " (" << problemeHebdo_->NomsDesPays[Area] << ")"
-                        << " h=" << hour
-                        << " ensInit=" << ensInit
-                        << " netPosInit=" << netPositionInit
-                        << " spillageInit=" << spillageInit
-                        << " RHS=" << rhsAreaBalanceValues[Area];
+            if (problemeHebdo_->adequacyPatchRuntimeData->csrDebugLogs)
+            {
+                const double dens = std::max(0.0, ensInit + netPositionInit);
+                logs.info() << "[ADQ-DEBUG][LMR] area='" << problemeHebdo_->NomsDesPays[Area]
+                            << "' h=" << hour
+                            << " ENS_init=" << ensInit
+                            << " netPosInit=" << netPositionInit
+                            << " DENS=" << dens
+                            << " spillageInit=" << spillageInit
+                            << " csrRHS=" << rhsAreaBalanceValues[Area];
+                logs.info() << "[GEMS-VERIFY][H2] csrRHS area=" << Area
+                            << " (" << problemeHebdo_->NomsDesPays[Area] << ")"
+                            << " h=" << hour
+                            << " ensInit=" << ensInit
+                            << " netPosInit=" << netPositionInit
+                            << " spillageInit=" << spillageInit
+                            << " RHS=" << rhsAreaBalanceValues[Area];
+            }
         }
     }
 }
@@ -293,6 +300,7 @@ void HourlyCSRProblem::run(uint week, uint year)
     buildProblemConstraintsRHS();
 
     // Dump constraint matrix with actual RHS (after RHS is set)
+    if (problemeHebdo_->adequacyPatchRuntimeData->csrDebugLogs)
     {
         logs.info() << "[ADQ-DEBUG][CSR-CON] h=" << triggeredHour
                     << " nCon=" << problemeAResoudre_.NombreDeContraintes
@@ -325,6 +333,7 @@ void HourlyCSRProblem::run(uint week, uint year)
     solveProblem(week, year, solverOptions_);
 
     // Dump full CSR QP solution for validation
+    if (problemeHebdo_->adequacyPatchRuntimeData->csrDebugLogs)
     {
         logs.info() << "[ADQ-DEBUG][CSR-SOL] h=" << triggeredHour
                     << " nVars=" << problemeAResoudre_.NombreDeVariables;
@@ -385,14 +394,17 @@ void HourlyCSRProblem::updateGemsExchangeAfterCSR()
         nameToIdx[problemeHebdo_->NomsDesPays[i]] = static_cast<int>(i);
 
     // Log LP values for all areas before overwrite
-    logs.info() << "[ADQ-DEBUG][WRITEBACK] preWrite NetechangeModeler h=" << triggeredHour;
-    for (uint32_t i = 0; i < problemeHebdo_->NombreDePays; ++i)
+    if (rtd->csrDebugLogs)
     {
-        const int mode = static_cast<int>(rtd->areaMode[i]);
-        const double val = problemeHebdo_->ResultatsHoraires[i]
-                             .ValeursHorairesNetechangeModeler[triggeredHour];
-        logs.info() << "[ADQ-DEBUG][WRITEBACK]   area='" << problemeHebdo_->NomsDesPays[i]
-                    << "' mode=" << mode << " lpVal=" << val;
+        logs.info() << "[ADQ-DEBUG][WRITEBACK] preWrite NetechangeModeler h=" << triggeredHour;
+        for (uint32_t i = 0; i < problemeHebdo_->NombreDePays; ++i)
+        {
+            const int mode = static_cast<int>(rtd->areaMode[i]);
+            const double val = problemeHebdo_->ResultatsHoraires[i]
+                                 .ValeursHorairesNetechangeModeler[triggeredHour];
+            logs.info() << "[ADQ-DEBUG][WRITEBACK]   area='" << problemeHebdo_->NomsDesPays[i]
+                        << "' mode=" << mode << " lpVal=" << val;
+        }
     }
 
     // Reset all areas then write inside + outside from QP solution
@@ -411,12 +423,13 @@ void HourlyCSRProblem::updateGemsExchangeAfterCSR()
             const double written = contrib.coefficient * qpVal;
             problemeHebdo_->ResultatsHoraires[it->second]
               .ValeursHorairesNetechangeModeler[triggeredHour] += written;
-            logs.info() << "[ADQ-DEBUG][WRITEBACK] " << tag
-                        << " area='" << contrib.areaName
-                        << "' col=" << contrib.csrColumn
-                        << " qpX=" << qpVal
-                        << " coeff=" << contrib.coefficient
-                        << " written=" << written;
+            if (rtd->csrDebugLogs)
+                logs.info() << "[ADQ-DEBUG][WRITEBACK] " << tag
+                            << " area='" << contrib.areaName
+                            << "' col=" << contrib.csrColumn
+                            << " qpX=" << qpVal
+                            << " coeff=" << contrib.coefficient
+                            << " written=" << written;
         }
     };
 
@@ -424,20 +437,23 @@ void HourlyCSRProblem::updateGemsExchangeAfterCSR()
     writeBack(outsideContribs, "outside");
 
     // Log post-write values and compute energy balance check
-    logs.info() << "[ADQ-DEBUG][WRITEBACK] postWrite NetechangeModeler h=" << triggeredHour;
-    double balanceSum = 0.0;
-    for (uint32_t i = 0; i < problemeHebdo_->NombreDePays; ++i)
+    if (rtd->csrDebugLogs)
     {
-        const int mode = static_cast<int>(rtd->areaMode[i]);
-        const double val = problemeHebdo_->ResultatsHoraires[i]
-                             .ValeursHorairesNetechangeModeler[triggeredHour];
-        balanceSum += val;
-        logs.info() << "[ADQ-DEBUG][WRITEBACK]   area='" << problemeHebdo_->NomsDesPays[i]
-                    << "' mode=" << mode << " csrVal=" << val;
+        logs.info() << "[ADQ-DEBUG][WRITEBACK] postWrite NetechangeModeler h=" << triggeredHour;
+        double balanceSum = 0.0;
+        for (uint32_t i = 0; i < problemeHebdo_->NombreDePays; ++i)
+        {
+            const int mode = static_cast<int>(rtd->areaMode[i]);
+            const double val = problemeHebdo_->ResultatsHoraires[i]
+                                 .ValeursHorairesNetechangeModeler[triggeredHour];
+            balanceSum += val;
+            logs.info() << "[ADQ-DEBUG][WRITEBACK]   area='" << problemeHebdo_->NomsDesPays[i]
+                        << "' mode=" << mode << " csrVal=" << val;
+        }
+        logs.info() << "[ADQ-DEBUG][BALANCE-CHECK] h=" << triggeredHour
+                    << " sum_exchange=" << balanceSum
+                    << (std::fabs(balanceSum) < 1.0 ? " OK" : " VIOLATION");
     }
-    logs.info() << "[ADQ-DEBUG][BALANCE-CHECK] h=" << triggeredHour
-                << " sum_exchange=" << balanceSum
-                << (std::fabs(balanceSum) < 1.0 ? " OK" : " VIOLATION");
 }
 
 void HourlyCSRProblem::setBoundsOnGemsFbExtraVars()
@@ -481,14 +497,17 @@ void HourlyCSRProblem::setBoundsOnGemsFbExtraVars()
     }
 
     // Step 3: dump all extra-variable bounds for validation.
-    for (int col = legacyEnd; col < problemeAResoudre_.NombreDeVariables; ++col)
+    if (rtd->csrDebugLogs)
     {
-        logs.info() << "[ADQ-DEBUG][CSR-VAR] h=" << triggeredHour
-                    << " col=" << col
-                    << " lb=" << problemeAResoudre_.Xmin[col]
-                    << " ub=" << problemeAResoudre_.Xmax[col]
-                    << " type=" << problemeAResoudre_.TypeDeVariable[col]
-                    << " (gems-extra)";
+        for (int col = legacyEnd; col < problemeAResoudre_.NombreDeVariables; ++col)
+        {
+            logs.info() << "[ADQ-DEBUG][CSR-VAR] h=" << triggeredHour
+                        << " col=" << col
+                        << " lb=" << problemeAResoudre_.Xmin[col]
+                        << " ub=" << problemeAResoudre_.Xmax[col]
+                        << " type=" << problemeAResoudre_.TypeDeVariable[col]
+                        << " (gems-extra)";
+        }
     }
 }
 
@@ -530,11 +549,12 @@ void HourlyCSRProblem::setRHSgemsFbConstraintsValue()
         if (!isInequalityRow)
         {
             problemeAResoudre_.SecondMembre[csrRow] = rhs;
-            logs.info() << "[GEMS-VERIFY][H3] setRHS: rowIdx=" << i
-                        << " csrRow=" << csrRow
-                        << " id=" << rows[i].constraintId
-                        << " rawRhs=" << rhs
-                        << " adjustedRhs=" << rhs << " (EQ row, no outside adjustment)";
+            if (rtd->csrDebugLogs)
+                logs.info() << "[GEMS-VERIFY][H3] setRHS: rowIdx=" << i
+                            << " csrRow=" << csrRow
+                            << " id=" << rows[i].constraintId
+                            << " rawRhs=" << rhs
+                            << " adjustedRhs=" << rhs << " (EQ row, no outside adjustment)";
             continue;
         }
         for (const auto& term : rows[i].terms)
@@ -549,12 +569,13 @@ void HourlyCSRProblem::setRHSgemsFbConstraintsValue()
             const double lpVal = problemeHebdo_->ResultatsHoraires[areaIdx]
                                    .ValeursHorairesNetechangeModeler[triggeredHour];
             const double correction = term.coefficient * lpVal;
-            logs.info() << "[ADQ-DEBUG][GEMS-RHS-ADJ] h=" << triggeredHour
-                        << " cnec=" << rows[i].constraintId
-                        << " area=" << colIt->second
-                        << " ptdf=" << term.coefficient
-                        << " lpVal=" << lpVal
-                        << " correction=" << correction;
+            if (rtd->csrDebugLogs)
+                logs.info() << "[ADQ-DEBUG][GEMS-RHS-ADJ] h=" << triggeredHour
+                            << " cnec=" << rows[i].constraintId
+                            << " area=" << colIt->second
+                            << " ptdf=" << term.coefficient
+                            << " lpVal=" << lpVal
+                            << " correction=" << correction;
             rhs += correction;
         }
 
@@ -567,10 +588,11 @@ void HourlyCSRProblem::setRHSgemsFbConstraintsValue()
             rhs -= belowThisThresholdSetToZero;
 
         problemeAResoudre_.SecondMembre[csrRow] = rhs;
-        logs.info() << "[GEMS-VERIFY][H3] setRHS: rowIdx=" << i
-                    << " csrRow=" << csrRow
-                    << " id=" << rows[i].constraintId
-                    << " rawRhs=" << rows[i].rhs
-                    << " adjustedRhs=" << rhs;
+        if (rtd->csrDebugLogs)
+            logs.info() << "[GEMS-VERIFY][H3] setRHS: rowIdx=" << i
+                        << " csrRow=" << csrRow
+                        << " id=" << rows[i].constraintId
+                        << " rawRhs=" << rows[i].rhs
+                        << " adjustedRhs=" << rhs;
     }
 }

@@ -12,6 +12,7 @@ struct CsrBindingConstraintHourData
     const std::vector<adqPatchParamsMode>& extremityAreaMode;
     const int hour;
     std::map<int, int>& numberOfConstraintCsrHourlyBinding;
+    bool csrDebugLogs = false;
 };
 
 class CsrBindingConstraintHour final: private ConstraintFactory

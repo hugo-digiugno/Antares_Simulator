@@ -33,7 +33,7 @@ void CsrBindingConstraintHour::add(int CntCouplante)
         {
             builder.NTCDirect(Interco, Poids);
         }
-        else
+        else if (data.csrDebugLogs)
         {
             Antares::logs.info()
               << "[ADQ-DEBUG][ORG-BC-DROP] h=" << data.hour

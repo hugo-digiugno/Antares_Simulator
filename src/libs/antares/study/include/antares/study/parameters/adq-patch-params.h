@@ -111,6 +111,10 @@ struct AdqPatchParams
 
     CurtailmentSharing curtailmentSharing;
 
+    //! Enable verbose adequacy-patch CSR debugging logs (set from the --adq-patch-debug CLI flag,
+    //! not read from the study INI).
+    bool csrDebugLogs = false;
+
     void reset();
     void addExcludedVariables(std::vector<std::string>&) const;
     bool updateFromKeyValue(const Yuni::String& key, const Yuni::String& value);

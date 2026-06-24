@@ -195,6 +195,12 @@ std::unique_ptr<Yuni::GetOpt::Parser> CreateParser(Settings& settings, StudyLoad
                     "progress",
                     "Display the progress of each task");
 
+    // --adq-patch-debug
+    parser->addFlag(options.adqPatchDebugLogs,
+                    ' ',
+                    "adq-patch-debug",
+                    "Enable verbose adequacy-patch CSR debugging logs");
+
     // --pid
     parser->add(settings.PID, 'p', "pid", "Specify the file where to write the process ID");
 

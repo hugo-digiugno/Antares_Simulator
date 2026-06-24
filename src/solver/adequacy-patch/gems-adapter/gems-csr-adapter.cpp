@@ -29,10 +29,12 @@ namespace Antares::AdequacyPatch
 
 GemsCsrAdapter::GemsCsrAdapter(const ModelerStudy::SystemModel::System& system,
                                 const CsrProblemContext& csrCtx,
-                                const std::regex& constraintFilter):
+                                const std::regex& constraintFilter,
+                                bool debugLogs):
     system_(system),
     csrCtx_(csrCtx),
-    constraintFilter_(constraintFilter)
+    constraintFilter_(constraintFilter),
+    debugLogs_(debugLogs)
 {
     buildAreaVarMap();
 }
@@ -84,16 +86,18 @@ void GemsCsrAdapter::buildAreaVarMap()
                     if (isInsideArea)
                     {
                         pendingAreaFlows_.push_back({areaName, vk, sign});
-                        logs.info() << "[GEMS-VERIFY][H1] buildAreaVarMap: area='" << areaName
-                                    << "' port='" << portId << "' expr=" << exprDesc
-                                    << " inside=true";
+                        if (debugLogs_)
+                            logs.info() << "[GEMS-VERIFY][H1] buildAreaVarMap: area='" << areaName
+                                        << "' port='" << portId << "' expr=" << exprDesc
+                                        << " inside=true";
                     }
                     else
                     {
                         pendingOutsideAreaFlows_.push_back({areaName, vk, sign});
-                        logs.info() << "[GEMS-VERIFY][H1] buildAreaVarMap: area='" << areaName
-                                    << "' port='" << portId << "' expr=" << exprDesc
-                                    << " inside=false (outside write-back)";
+                        if (debugLogs_)
+                            logs.info() << "[GEMS-VERIFY][H1] buildAreaVarMap: area='" << areaName
+                                        << "' port='" << portId << "' expr=" << exprDesc
+                                        << " inside=false (outside write-back)";
                     }
                 };
 
@@ -115,7 +119,7 @@ void GemsCsrAdapter::buildAreaVarMap()
                                   std::string("Neg(VariableNode) sign=-1 var='")
                                     + varNode->value() + "'");
                     }
-                    else
+                    else if (debugLogs_)
                     {
                         logs.warning() << "[GEMS-VERIFY][H1] buildAreaVarMap: area='" << areaName
                                        << "' port='" << portId
@@ -123,7 +127,7 @@ void GemsCsrAdapter::buildAreaVarMap()
                                        << neg->child()->name();
                     }
                 }
-                else
+                else if (debugLogs_)
                 {
                     logs.warning() << "[GEMS-VERIFY][H1] buildAreaVarMap: area='" << areaName
                                    << "' port='" << portId
@@ -144,8 +148,10 @@ void GemsCsrAdapter::buildAreaFlowMap()
         if (it != varIdToColIdx_.end())
         {
             areaFlowContribs_.push_back({pending.areaName, it->second, pending.sign});
-            logs.info() << "[GEMS-VERIFY][H1] areaFlowContrib (inside): area='" << pending.areaName
-                        << "' csrCol=" << it->second << " coeff=" << pending.sign;
+            if (debugLogs_)
+                logs.info() << "[GEMS-VERIFY][H1] areaFlowContrib (inside): area='"
+                            << pending.areaName
+                            << "' csrCol=" << it->second << " coeff=" << pending.sign;
         }
     }
     for (const auto& pending : pendingOutsideAreaFlows_)
@@ -154,9 +160,10 @@ void GemsCsrAdapter::buildAreaFlowMap()
         if (it != varIdToColIdx_.end())
         {
             outsideAreaFlowContribs_.push_back({pending.areaName, it->second, pending.sign});
-            logs.info() << "[GEMS-VERIFY][H1] areaFlowContrib (outside): area='"
-                        << pending.areaName
-                        << "' csrCol=" << it->second << " coeff=" << pending.sign;
+            if (debugLogs_)
+                logs.info() << "[GEMS-VERIFY][H1] areaFlowContrib (outside): area='"
+                            << pending.areaName
+                            << "' csrCol=" << it->second << " coeff=" << pending.sign;
         }
     }
 }
@@ -638,18 +645,21 @@ std::vector<CsrRow> GemsCsrAdapter::rowsForHour(int hour, int mcYear) const
 
             if (buildRow(root, component, row, uHour, tsNumber))
             {
-                const char* senseStr = row.sense == CsrRowSense::LE ? "LE"
-                                     : row.sense == CsrRowSense::GE ? "GE" : "EQ";
-                logs.info() << "[GEMS-VERIFY][H3] rowsForHour h=" << hour
-                            << " mc=" << mcYear << " tsNum=" << tsNumber
-                            << " idx=" << rows.size()
-                            << " id=" << row.constraintId
-                            << " sense=" << senseStr << " rhs=" << row.rhs
-                            << " nterms=" << row.terms.size();
-                for (const auto& t : row.terms)
+                if (debugLogs_)
                 {
-                    logs.info() << "[GEMS-VERIFY][H3]   term col=" << t.column
-                                << " coeff=" << t.coefficient;
+                    const char* senseStr = row.sense == CsrRowSense::LE ? "LE"
+                                         : row.sense == CsrRowSense::GE ? "GE" : "EQ";
+                    logs.info() << "[GEMS-VERIFY][H3] rowsForHour h=" << hour
+                                << " mc=" << mcYear << " tsNum=" << tsNumber
+                                << " idx=" << rows.size()
+                                << " id=" << row.constraintId
+                                << " sense=" << senseStr << " rhs=" << row.rhs
+                                << " nterms=" << row.terms.size();
+                    for (const auto& t : row.terms)
+                    {
+                        logs.info() << "[GEMS-VERIFY][H3]   term col=" << t.column
+                                    << " coeff=" << t.coefficient;
+                    }
                 }
                 rows.push_back(std::move(row));
             }

@@ -152,10 +152,11 @@ void HourlyCSRProblem::setGemsLinearCost()
         if (term.col >= 0 && term.col < problemeAResoudre_.NombreDeVariables)
         {
             problemeAResoudre_.CoutLineaire[term.col] = term.cost;
-            logs.info() << "[ADQ-DEBUG][GEMS-LINEAR-COST] col=" << term.col
-                        << " name=" << (term.col < static_cast<int>(problemeAResoudre_.NomDesVariables.size())
-                                        ? problemeAResoudre_.NomDesVariables[term.col] : "?")
-                        << " cost=" << term.cost;
+            if (rtd->csrDebugLogs)
+                logs.info() << "[ADQ-DEBUG][GEMS-LINEAR-COST] col=" << term.col
+                            << " name=" << (term.col < static_cast<int>(problemeAResoudre_.NomDesVariables.size())
+                                            ? problemeAResoudre_.NomDesVariables[term.col] : "?")
+                            << " cost=" << term.cost;
         }
     }
 }

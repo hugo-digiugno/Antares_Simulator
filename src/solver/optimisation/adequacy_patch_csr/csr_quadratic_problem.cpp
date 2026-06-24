@@ -86,7 +86,8 @@ void CsrQuadraticProblem::setBindingConstraints(ConstraintBuilder& builder)
       .originAreaMode = problemeHebdo_->adequacyPatchRuntimeData->originAreaMode,
       .extremityAreaMode = problemeHebdo_->adequacyPatchRuntimeData->extremityAreaMode,
       .hour = hour,
-      .numberOfConstraintCsrHourlyBinding = hourlyCsrProblem_.numberOfConstraintCsrHourlyBinding};
+      .numberOfConstraintCsrHourlyBinding = hourlyCsrProblem_.numberOfConstraintCsrHourlyBinding,
+      .csrDebugLogs = problemeHebdo_->adequacyPatchRuntimeData->csrDebugLogs};
 
     CsrBindingConstraintHour csrBindingConstraintHour(
       builder,
@@ -161,12 +162,13 @@ void CsrQuadraticProblem::setFlowBasedConstraints(ConstraintBuilder& builder)
             auto it = outsideCols.find(term.column);
             if (it != outsideCols.end() && isInequalityRow)
             {
-                logs.info() << "[ADQ-DEBUG][GEMS-BC-DROP] h=" << hour
-                            << " cnec=" << row.constraintId
-                            << " area=" << it->second
-                            << " col=" << term.column
-                            << " ptdf=" << term.coefficient
-                            << " (outside-area term excluded from fbc_ LHS, compensated in RHS)";
+                if (rtd->csrDebugLogs)
+                    logs.info() << "[ADQ-DEBUG][GEMS-BC-DROP] h=" << hour
+                                << " cnec=" << row.constraintId
+                                << " area=" << it->second
+                                << " col=" << term.column
+                                << " ptdf=" << term.coefficient
+                                << " (outside-area term excluded from fbc_ LHS, compensated in RHS)";
                 continue;
             }
             builder.rawTerm(term.column, term.coefficient);
@@ -180,11 +182,12 @@ void CsrQuadraticProblem::setFlowBasedConstraints(ConstraintBuilder& builder)
             const char* senseStr = row.sense == Antares::AdequacyPatch::CsrRowSense::LE ? "LE"
                                  : row.sense == Antares::AdequacyPatch::CsrRowSense::GE ? "GE"
                                                                                          : "EQ";
-            logs.info() << "[GEMS-VERIFY][H3] setLHS: rowIdx=" << (rowIndices.size() - 1)
-                        << " csrRow=" << csrRow
-                        << " id=" << row.constraintId
-                        << " sense=" << senseStr
-                        << " nterms=" << row.terms.size();
+            if (rtd->csrDebugLogs)
+                logs.info() << "[GEMS-VERIFY][H3] setLHS: rowIdx=" << (rowIndices.size() - 1)
+                            << " csrRow=" << csrRow
+                            << " id=" << row.constraintId
+                            << " sense=" << senseStr
+                            << " nterms=" << row.terms.size();
             switch (row.sense)
             {
             case Antares::AdequacyPatch::CsrRowSense::LE:
@@ -201,8 +204,9 @@ void CsrQuadraticProblem::setFlowBasedConstraints(ConstraintBuilder& builder)
         }
         else
         {
-            logs.warning() << "[GEMS-VERIFY][H3] setLHS: id=" << row.constraintId
-                           << " has 0 terms after builder — pushed csrRow=-1 (skipped)";
+            if (rtd->csrDebugLogs)
+                logs.warning() << "[GEMS-VERIFY][H3] setLHS: id=" << row.constraintId
+                               << " has 0 terms after builder — pushed csrRow=-1 (skipped)";
             rowIndices.push_back(-1);
         }
     }

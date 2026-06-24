@@ -34,6 +34,9 @@ public:
     //! Force the year-by-year flag
     bool forceYearByYear;
 
+    //! Enable verbose adequacy-patch CSR debugging logs
+    bool adqPatchDebugLogs = false;
+
     //! Force the derated mode
     bool forceDerated;
 

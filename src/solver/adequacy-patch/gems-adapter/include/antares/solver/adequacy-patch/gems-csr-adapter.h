@@ -79,7 +79,8 @@ public:
     GemsCsrAdapter(const ModelerStudy::SystemModel::System& system,
                    const CsrProblemContext& csrCtx,
                    const std::regex& constraintFilter
-                     = std::regex(R"(^flow_based_constraint_)"));
+                     = std::regex(R"(^flow_based_constraint_)"),
+                   bool debugLogs = false);
 
     void registerExtraVariables(CsrProblemBuilder& builder);
     std::vector<CsrRow> rowsForHour(int hour, int mcYear) const;
@@ -157,6 +158,7 @@ private:
     const ModelerStudy::SystemModel::System& system_;
     CsrProblemContext csrCtx_;
     std::regex constraintFilter_;
+    bool debugLogs_ = false;
     std::map<VarKey, int> varIdToColIdx_;
     std::vector<PendingAreaFlow> pendingAreaFlows_;
     std::vector<PendingAreaFlow> pendingOutsideAreaFlows_;

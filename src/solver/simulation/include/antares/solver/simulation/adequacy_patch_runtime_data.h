@@ -44,6 +44,9 @@ public:
     bool useGemsFbConstraints = false;
     std::shared_ptr<Antares::AdequacyPatch::GemsCsrAdapter> gemsCsrAdapter;
 
+    //! Verbose adequacy-patch CSR debugging logs (set from the --adq-patch-debug CLI flag).
+    bool csrDebugLogs = false;
+
     bool wasCSRTriggeredAtAreaHour(int area, int hour) const;
     void addCSRTriggeredAtAreaHour(int area, int hour);
 };
