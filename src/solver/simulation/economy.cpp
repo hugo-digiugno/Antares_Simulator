@@ -157,15 +157,19 @@ struct WeekSolveResult
 };
 
 // ---------------------------------------------------------------------------
-// Solve one week: set up the problem, run the LP, run post-processes.
+// Solve one week: set up the problem and run the LP.
 // This function does NOT touch Variable::State (no weekBegin / hourForEachArea
 // / weekEnd / weekForEachArea calls) so it is safe to call from async threads.
+//
+// It also does NOT run the post-processes: those write shared per-numSpace
+// scratchpad buffers (e.g. dispatchableGenerationMargin) that would race across
+// concurrent weeks. They are run single-threaded, in week order, in the
+// aggregation loop of Economy::year().
 //
 // \param problem    The week's PROBLEME_HEBDO clone, already set up with the
 //                   correct previousSimulationFinalLevel. Modified in place by
 //                   SIM_RenseignementProblemeHebdo, BuildThermalPart, and solve().
 // \param weekOpt    WeeklyOptimization whose problemeHebdo_ points to \p problem.
-// \param postProcessList PostProcessList whose problemeHebdo_ points to \p problem.
 // ---------------------------------------------------------------------------
 static WeekSolveResult solveOneWeek(Data::Study& study,
                                     PROBLEME_HEBDO& problem,
@@ -174,8 +178,7 @@ static WeekSolveResult solveOneWeek(Data::Study& study,
                                     const HYDRO_VENTILATION_RESULTS& hydroVentilationResults,
                                     const yearRandomNumbers& randomForYear,
                                     const Antares::Data::Area::ScratchMap& scratchmap,
-                                    Optimization::WeeklyOptimization& weekOpt,
-                                    interfacePostProcessList& postProcessList)
+                                    Optimization::WeeklyOptimization& weekOpt)
 {
     WeekSolveResult res;
     res.weekIndex = weekIndex;
@@ -199,9 +202,6 @@ static WeekSolveResult solveOneWeek(Data::Study& study,
     try
     {
         weekOpt.solve();
-
-        optRuntimeData opt_runtime_data(problem.year, weekIndex, hourInTheYear);
-        postProcessList.runAll(opt_runtime_data);
 
         res.timeMeasure = problem.timeMeasure;
         // Store the solved problem via unique_ptr (PROBLEME_HEBDO is not move-assignable
@@ -427,21 +427,16 @@ bool Economy::year(Progression::Task& progression,
                &sem,
                numSpace,
                problem = std::move(weekProblem)]() mutable -> WeekSolveResult {
-                  // Create WeeklyOptimization and postProcessList inside the lambda so
-                  // their internal PROBLEME_HEBDO* pointers reference the moved-in clone.
+                  // Create WeeklyOptimization inside the lambda so its internal
+                  // PROBLEME_HEBDO* pointer references the moved-in clone.
+                  // The postProcessList is NOT created here: post-processes write
+                  // shared per-numSpace scratchpad and are run serially in the
+                  // aggregation loop below.
                   Optimization::WeeklyOptimization weekOpt(study.parameters.optOptions,
                                                            &problem,
                                                            resultWriter_,
                                                            simulationObserver_.get(),
                                                            nullptr);
-                  auto weekPostProc = interfacePostProcessList::create(
-                    study.parameters.adqPatchParams,
-                    &problem,
-                    numSpace,
-                    study.areas,
-                    study.parameters,
-                    study.calendar,
-                    resultWriter_);
 
                   sem.acquire();
                   auto result = solveOneWeek(study,
@@ -451,8 +446,7 @@ bool Economy::year(Progression::Task& progression,
                                              hydroVentilationResults,
                                              randomForYear,
                                              scratchmap,
-                                             weekOpt,
-                                             *weekPostProc);
+                                             weekOpt);
                   sem.release();
                   return result;
               }));
@@ -490,6 +484,25 @@ bool Economy::year(Progression::Task& progression,
             state.problemeHebdo = &solvedPb;
             state.hourInTheYear = res.hourInTheYear;
             state.weekInTheYear = w;
+
+            // Run the post-processes here, single-threaded and in week order,
+            // NOT inside the async lambda. They write shared per-numSpace scratchpad
+            // buffers (e.g. dispatchableGenerationMargin, consumed by DTG MRG / MAX MRG),
+            // so running them concurrently across weeks would race and make the margin
+            // outputs depend on thread scheduling. Running them right before the
+            // Variable::State reads matches the sequential path's ordering.
+            {
+                auto weekPostProc = interfacePostProcessList::create(
+                  study.parameters.adqPatchParams,
+                  &solvedPb,
+                  numSpace,
+                  study.areas,
+                  study.parameters,
+                  study.calendar,
+                  resultWriter_);
+                optRuntimeData opt_runtime_data(state.year, w, res.hourInTheYear);
+                weekPostProc->runAll(opt_runtime_data);
+            }
 
             variables.weekBegin(state);
             uint previousHourInTheYear = state.hourInTheYear;
