@@ -6,7 +6,6 @@
 #ifdef ANTARES_WEEK_PARALLELISM
 #include <cassert>
 #include <future>
-#include <semaphore>
 #endif
 
 #include <antares/exception/AssertionError.hpp>
@@ -390,68 +389,70 @@ bool Economy::year(Progression::Task& progression,
                                                                 pNbWeeks,
                                                                 pStartTime);
 
-        // Step 2 – Launch all week solves asynchronously, throttled by a semaphore.
-        // std::counting_semaphore<N> requires a compile-time maximum; 52 is the
-        // largest possible number of weeks in a year.
-        static constexpr std::ptrdiff_t kMaxWeeks = 52;
-        std::counting_semaphore<kMaxWeeks> sem(
-          static_cast<std::ptrdiff_t>(pNbMaxWeeksInParallel));
-
-        // We create a WeeklyOptimization and a postProcessList per week-clone so
-        // each LP solve is fully independent.
-        std::vector<std::future<WeekSolveResult>> futures;
-        futures.reserve(pNbWeeks);
-
-        int wHourInYear = pStartTime;
-        for (uint w = 0; w < pNbWeeks; ++w)
+        // Step 2 – Solve weeks with a bounded sliding window of at most `window`
+        // in-flight clones, launching new weeks only as earlier ones are consumed.
+        //
+        // The earlier implementation launched one std::async per week up front, so
+        // up to pNbWeeks (52) clones and threads were live at once and peak memory
+        // was governed by the number of weeks, not by pNbMaxWeeksInParallel. Here we
+        // keep at most `window` clones/threads alive and free each solved clone as
+        // soon as it is aggregated, so peak RSS scales with the requested parallel
+        // count.
+        uint window = pNbMaxWeeksInParallel;
+        if (window < 1)
         {
-            // Clone the problem with the precomputed initial level for this week
+            window = 1;
+        }
+        if (window > pNbWeeks)
+        {
+            window = pNbWeeks;
+        }
+
+        std::vector<std::future<WeekSolveResult>> futures(pNbWeeks);
+
+        // Clone the problem for week w and start its async LP solve. The clone is
+        // moved into the async task so each solve owns its own problem struct.
+        auto launchWeek = [&](uint w)
+        {
+            const int capturedHour = pStartTime + static_cast<int>(w * nbHoursInAWeek);
             PROBLEME_HEBDO weekProblem = cloneProblemHebdoForWeek(currentProblem,
-                                                                   w,
-                                                                   weeklyLevels[w]);
-
-            const int capturedHour = wHourInYear;
-            const uint capturedW = w;
-
-            // Capture all parameters needed to create WeeklyOptimization and
-            // postProcessList INSIDE the lambda (after the problem is moved into
-            // its final memory location).
-            futures.push_back(std::async(
+                                                                  w,
+                                                                  weeklyLevels[w]);
+            futures[w] = std::async(
               std::launch::async,
               [this,
-               capturedW,
+               w,
                capturedHour,
                &hydroVentilationResults,
                &randomForYear,
                &scratchmap,
-               &sem,
-               numSpace,
-               problem = std::move(weekProblem)]() mutable -> WeekSolveResult {
+               problem = std::move(weekProblem)]() mutable -> WeekSolveResult
+              {
                   // Create WeeklyOptimization inside the lambda so its internal
                   // PROBLEME_HEBDO* pointer references the moved-in clone.
-                  // The postProcessList is NOT created here: post-processes write
-                  // shared per-numSpace scratchpad and are run serially in the
-                  // aggregation loop below.
+                  // Post-processes are NOT run here: they write shared per-numSpace
+                  // scratchpad and are run serially in the aggregation loop below.
                   Optimization::WeeklyOptimization weekOpt(study.parameters.optOptions,
                                                            &problem,
                                                            resultWriter_,
                                                            simulationObserver_.get(),
                                                            nullptr);
+                  return solveOneWeek(study,
+                                      problem,
+                                      w,
+                                      capturedHour,
+                                      hydroVentilationResults,
+                                      randomForYear,
+                                      scratchmap,
+                                      weekOpt);
+              });
+        };
 
-                  sem.acquire();
-                  auto result = solveOneWeek(study,
-                                             problem,
-                                             capturedW,
-                                             capturedHour,
-                                             hydroVentilationResults,
-                                             randomForYear,
-                                             scratchmap,
-                                             weekOpt);
-                  sem.release();
-                  return result;
-              }));
-
-            wHourInYear += static_cast<int>(nbHoursInAWeek);
+        // Prime the window: start the first `window` weeks.
+        uint nextToLaunch = 0;
+        for (; nextToLaunch < window; ++nextToLaunch)
+        {
+            launchWeek(nextToLaunch);
         }
 
         // Step 3 – Sequential aggregation in week order.
@@ -460,6 +461,14 @@ bool Economy::year(Progression::Task& progression,
         for (uint w = 0; w < pNbWeeks; ++w)
         {
             WeekSolveResult res = futures[w].get();
+            futures[w] = std::future<WeekSolveResult>{}; // drop the moved-from clone shell
+
+            // Slide the window: now that week w has been consumed, launch the next
+            // pending week so at most `window` clones/threads are ever live at once.
+            if (nextToLaunch < pNbWeeks)
+            {
+                launchWeek(nextToLaunch++);
+            }
 
             if (!res.success)
             {
