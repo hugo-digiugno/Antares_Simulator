@@ -541,6 +541,58 @@ bool Economy::year(Progression::Task& progression,
             ++progression;
         }
 
+        // Ensure the canonical problem for this numSpace has its ProblemeAResoudre
+        // LP structure built. In the parallel path the weeks are solved on clones,
+        // so pProblemesHebdo[numSpace] is otherwise never solved and its LP arrays
+        // (e.g. TypeDeVariable) stay empty. Post-simulation steps reuse this problem
+        // -- notably ComputeFlowQuad() in simulationEnd(), which builds a quadratic
+        // flow problem on top of these arrays and would dereference an empty vector
+        // (segfault) on FLOW QUAD studies. Building week 0 once (the solution is
+        // discarded) restores the invariant the sequential path always maintained.
+        // Guarded so it runs only once per numSpace; MPS/solution export is
+        // suppressed so this throwaway build produces no output files.
+        if (currentProblem.ProblemeAResoudre->TypeDeVariable.empty())
+        {
+            const auto savedExportMPS = currentProblem.ExportMPS;
+            const bool savedExportMPSOnError = currentProblem.exportMPSOnError;
+            const bool savedExportSolutions = currentProblem.exportSolutions;
+            currentProblem.ExportMPS = Data::mpsExportStatus::NO_EXPORT;
+            currentProblem.exportMPSOnError = false;
+            currentProblem.exportSolutions = false;
+
+            currentProblem.weekInTheYear = 0;
+            currentProblem.HeureDansLAnnee = pStartTime;
+            ::SIM_RenseignementProblemeHebdo(study,
+                                             currentProblem,
+                                             0,
+                                             pStartTime,
+                                             hydroVentilationResults,
+                                             scratchmap);
+            BuildThermalPartOfWeeklyProblem(study,
+                                            currentProblem,
+                                            pStartTime,
+                                            randomForYear.pThermalNoisesByArea,
+                                            state.year);
+            try
+            {
+                weeklyOptProblems_[numSpace].solve();
+            }
+            catch (Data::AssertionError&)
+            {
+                // The LP structure is built before the solve; the discarded result
+                // is not needed here, so a solver failure on this throwaway build is
+                // ignored (real per-week failures are reported from the clones).
+            }
+            catch (Data::UnfeasibleProblemError&)
+            {
+                // idem
+            }
+
+            currentProblem.ExportMPS = savedExportMPS;
+            currentProblem.exportMPSOnError = savedExportMPSOnError;
+            currentProblem.exportSolutions = savedExportSolutions;
+        }
+
         // Restore state.problemeHebdo to the canonical slot for this numSpace
         state.problemeHebdo = &currentProblem;
     }

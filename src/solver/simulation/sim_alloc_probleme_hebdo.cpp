@@ -73,7 +73,12 @@ PROBLEME_HEBDO cloneProblemHebdoForWeek(
     dst.YaDeLaReserveJmoins1            = src.YaDeLaReserveJmoins1;
     dst.Expansion                       = src.Expansion;
     dst.HeureDansLAnnee                 = src.HeureDansLAnnee;
-    dst.LeProblemeADejaEteInstancie     = src.LeProblemeADejaEteInstancie;
+    // The clone gets a fresh, empty ProblemeAResoudre (below), so it must be
+    // treated as not-yet-instantiated regardless of the source's state --
+    // otherwise the clone's first solve skips the LP allocation (ProblemesSpx,
+    // TypeDeVariable, ...) and dereferences empty vectors. Do NOT copy the
+    // source's flag here.
+    dst.LeProblemeADejaEteInstancie     = false;
     dst.ExportMPS                       = src.ExportMPS;
     dst.exportMPSOnError                = src.exportMPSOnError;
     dst.NamedProblems                   = src.NamedProblems;
