@@ -125,6 +125,7 @@ jobs:
         docker build \
         -t antares:centos7  \
         --build-arg="BRANCH=${{ env.REF }}" \
+        --build-arg="REPO_URL=${{ github.server_url }}/${{ github.repository }}.git" \
         --build-arg="NPROC=$(nproc)" \
         --build-arg="VCPKG_CACHE_DIR=./vcpkg_cache" \
         --build-arg CCACHE_DIR=./.ccache \
@@ -146,7 +147,9 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: centos-targz
-        path: archive/*.tar.gz
+        path: |
+          archive/*.tar.gz
+          archive/*.rpm
 
     - name: Publish assets
       if: ${{ env.IS_RELEASE == 'true' }}

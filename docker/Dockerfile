@@ -16,8 +16,9 @@ COPY $VCPKG_CACHE_DIR /workspace/
 
 
 ARG BRANCH=develop
+ARG REPO_URL=https://github.com/AntaresSimulatorTeam/Antares_Simulator.git
 RUN cd /workspace && rm -rf Antares_Simulator && \
-    git clone https://github.com/AntaresSimulatorTeam/Antares_Simulator.git --branch $BRANCH && \
+    git clone $REPO_URL --branch $BRANCH && \
     cd Antares_Simulator && \
     git submodule update --init vcpkg && ./vcpkg/bootstrap-vcpkg.sh -disableMetrics && \
     export VCPKG_ROOT=/workspace/Antares_Simulator/vcpkg
